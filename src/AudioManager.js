@@ -6,18 +6,18 @@
 class AudioManager {
 
     constructor (worker_id) {
-        this.assets = new Map();
-        this.workerID = worker_id;
-        this.isWorker = typeof importScripts !== 'undefined' && typeof DedicatedWorkerGlobalScope !== 'undefined';
-        this.instances = new Map();
+        this.assets         = new Map();
+        this.workerID       = worker_id;
+        this.isWorker       = typeof importScripts !== 'undefined' && typeof DedicatedWorkerGlobalScope !== 'undefined';
+        this.instances      = new Map();
         this.assetInstances = new Map(); // Track instances by asset ID for faster lookup
-        this.listener = null;
-        this.masterVolume = 1;
+        this.listener       = null;
+        this.masterVolume   = 1;
         this.nextInstanceId = 0;
 
         if (!this.isWorker) {
             try {
-                this.context = new (window.AudioContext || window.webkitAudioContext)();
+                this.context  = new (window.AudioContext || window.webkitAudioContext)();
                 this.listener = this.context.listener;
                 this._initSpatialAudio();
             } catch (e) {
@@ -700,7 +700,32 @@ class AudioManager {
     }
     /** ======== END ======== */
 
-    /** ======== CLEANUP ======== */
+    /** ======== CLEANER ======== */
+    delete (id) {
+        if (this.isWorker) {
+            this._sendWorker({ action: 'audio_delete', args: [id] });
+            return this;
+        }
+
+        let instance = this.instances.get(id);
+        if (instance) {
+            try { instance.source.stop() } catch {}
+            this.instances.delete(id);
+            if (this.assetInstances.has(instance.assetId)) {
+                this.assetInstances.get(instance.assetId).delete(id);
+                if (this.assetInstances.get(instance.assetId).size === 0)
+                    this.assetInstances.delete(instance.assetId);
+            }
+            return this;
+        }
+
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds)
+            Array.from(assetInstanceIds).forEach(iId => this.delete(iId));
+
+        this.assets.delete(id);
+        return this;
+    }
     cleanup () {
         if (this.isWorker) {
             this._sendWorker({action: 'audio_cleanup', args: []});

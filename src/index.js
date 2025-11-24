@@ -60,15 +60,14 @@ if (typeof window !== 'undefined') {
     };
 
     // 1) AMD
-    if (typeof define === 'function' && define.amd) {
-        define(function () { return PixaloBundle; });
-    }
+    if (typeof define === 'function' && define.amd)
+        define(function () { return PixaloBundle });
+
     // 2) CommonJS
-    else if (typeof module === 'object' && module.exports) {
+    else if (typeof module === 'object' && module.exports)
         module.exports = PixaloBundle;
-    }
+
     // 3) Browser global
-    else {
+    else
         window.PixaloBundle = PixaloBundle;
-    }
 }

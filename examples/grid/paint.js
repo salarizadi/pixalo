@@ -10,10 +10,10 @@
 import Pixalo from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
 
 const game = new Pixalo('#canvas', {
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width : innerWidth,
+    height: innerHeight,
     background: '#111',
-    grids: {
+    grid: {
         width: 24,
         height: 24,
         color: 'rgba(255,255,255,0.1)',
@@ -26,19 +26,19 @@ const game = new Pixalo('#canvas', {
     }
 });
 game.start();
-game.enableGrid();
+game.grid.enable();
 
 let painting = false;
 let erasing = false;
 
 game.on(['mousedown', 'touchstart'], () => painting = true);
 game.on(['mouseup', 'touchend'], () => painting = false);
-game.on('keydown', k => erasing = k.toLowerCase() === 'x');
-game.on('keyup', k => { if (k.toLowerCase() === 'x') erasing = false; });
+game.on('keydown', ({key}) => erasing = key.toLowerCase() === 'x');
+game.on('keyup', ({key}) => key === 'x' ? erasing = false : null);
 
 game.on(['mousemove', 'touchmove'], e => {
     if (!painting) return;
-    const {x, y} = game.snapToGrid(e.x - 1, e.y - 1);
+    const {x, y} = game.grid.snapToGrid(e.x - 1, e.y - 1);
     const key = `cell_${x}_${y}`;
 
     if (erasing) {
@@ -65,5 +65,7 @@ game.append('guide', {
     y: 10,
     fill: 'transparent',
     text: 'Hold & drag to paint tiles; press X while dragging to erase instead.',
-    color: 'white'
+    color: 'white',
+    position: 'fixed',
+    layer: 'above'
 });

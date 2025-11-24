@@ -20,13 +20,13 @@ game.start();
  */
 let rot = false;
 game.on({
-    keydown: key => {
+    keydown: ({key}) => {
         if (key === 'space' && !rot) {
             rot = true;
             game.camera.rotateBy(45, false, 300);
         }
     },
-    keyup: key => {
+    keyup: ({key}) => {
         if (key === 'space' && rot) {
             rot = false;
             game.camera.rotateBy(-45, false, 300);

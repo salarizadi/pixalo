@@ -14,7 +14,7 @@ const game = new Pixalo('#canvas', {
     height: window.innerHeight
 });
 
-await game.loadAsset('audio', 'click', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/sfx/click.m4a', {
+await game.assets.load('audio', 'click', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/sfx/click.m4a', {
     volume: 1
 });
 

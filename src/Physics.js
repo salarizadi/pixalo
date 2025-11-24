@@ -43,28 +43,31 @@ class Physics {
         };
         this.config = {...this.originalConfig};
 
-        this.world = new Box2D.Dynamics.b2World(
+        this.running = true;
+        this.world   = new Box2D.Dynamics.b2World(
             new Box2D.Common.Math.b2Vec2(gravity.x / this.SCALE, gravity.y / this.SCALE),
             this.originalConfig.sleep
         );
-
-        this.bodies = new Map();
-        this.joints = new Map();
-        this.velocities = new Map();
-        this.materials = new Map();
+        this.bodies         = new Map();
+        this.joints         = new Map();
+        this.velocities     = new Map();
+        this.materials      = new Map();
         this.activeContacts = new Map();
 
         this._setupContactListener();
 
-        this.mouseJoints = new Map();
+        this.mouseJoints   = new Map();
         this.draggedBodies = new Map();
-        this.bodyTouchMap = new Map();
-        this.mouseWorld = new Box2D.Common.Math.b2Vec2(0, 0);
+        this.bodyTouchMap  = new Map();
+        this.mouseWorld    = new Box2D.Common.Math.b2Vec2(0, 0);
 
         this._setupDragListeners();
     }
 
+    start () {this.running = true}
+    stop () {this.running = false}
     update (deltaTime) {
+        if (!this.running) return;
         const dt = Math.min(deltaTime, 20) / 1000; // Maximum 20ms, converted to seconds
 
         this.world.Step(
@@ -341,17 +344,18 @@ class Physics {
         return body;
     }
     removeEntity (entity) {
-        const body = this.bodies.get(entity.id);
+        entity = this._getEntityId(entity);
+        const body = this.bodies.get(entity);
         if (body) {
             Promise.resolve().then(() => {
                 body.SetActive(false);
                 body.SetUserData(null);
 
                 this.world.DestroyBody(body);
-                this.bodies.delete(entity.id);
-                this.velocities.delete(entity.id);
-                this.activeContacts.delete(entity.id);
-                this.bodies.delete(entity.id);
+                this.bodies.delete(entity);
+                this.velocities.delete(entity);
+                this.activeContacts.delete(entity);
+                this.bodies.delete(entity);
             });
         }
         return this;
@@ -369,12 +373,16 @@ class Physics {
             relative: false,
             onUpdate: null,
             onComplete: null,
+            onPause: null,
+            onResume: null,
             ...options
         };
 
         const entity = config.entity;
         if (!entity || !this.engine.isEntity(entity))
             throw new Error('Entity is required');
+
+        entity.halt(); // cancel any previous move-animation
 
         const body = this.bodies.get(entity.id);
         if (!body) return this;
@@ -420,11 +428,7 @@ class Physics {
                 return true;
             }
 
-            /* ---------- animated move ---------- */
-            let startTime = performance.now();
-            let pausedAt = 0;
-            let totalPause = 0;
-
+            /* ---------- animated move with animate ---------- */
             const deltaX = target.x - startPos.x;
             const deltaY = target.y - startPos.y;
 
@@ -433,23 +437,7 @@ class Physics {
                     ? config.easing
                     : (this.engine.Ease?.[config.easing] || this.engine.Ease.linear);
 
-            const animate = (now) => {
-                /* ---- engine paused -> record pause start ---- */
-                if (!this.engine.running) {
-                    if (pausedAt === 0) pausedAt = now;
-                    requestAnimationFrame(animate);
-                    return;
-                }
-
-                /* ---- just resumed -> update total paused time ---- */
-                if (pausedAt !== 0) {
-                    totalPause += now - pausedAt;
-                    pausedAt = 0;
-                }
-
-                const adjustedNow = now - totalPause;
-                const elapsed = adjustedNow - startTime;
-
+            const animation = this.engine.animate(({elapsed}) => {
                 /* ---- final frame ---- */
                 if (elapsed >= config.duration) {
                     const finalPos = new Box2D.Common.Math.b2Vec2(
@@ -460,7 +448,13 @@ class Physics {
                     body.SetPosition(finalPos);
                     restoreType(wasStatic);
                     config.onComplete?.(entity);
-                    return;
+
+                    // Remove animation reference from entity
+                    if (entity.data('physicsMoveAnimation')) {
+                        entity.unset('physicsMoveAnimation');
+                    }
+
+                    return false; // stop animation
                 }
 
                 /* ---- interpolate ---- */
@@ -478,15 +472,18 @@ class Physics {
 
                 config.onUpdate?.(entity, eased);
 
-                /* ---- keep looping ---- */
-                requestAnimationFrame(animate);
-            };
+                return true; // continue animation
+            }, {
+                onPause: config.onPause,
+                onResume: config.onResume
+            });
 
-            requestAnimationFrame(animate);
-            return this;
+            // Store animation reference on entity for cancellation
+            entity.data('physicsMoveAnimation', animation);
+            return true;
         } catch (err) {
             this.engine.warn('Error moving entity:', err);
-            return this;
+            return false;
         }
     }
     _getEntityId (entity) {
@@ -1585,7 +1582,11 @@ class Physics {
     /** ======== END JOINT SYSTEM ======== */
 
     /** ======== DRAG & DROP ======== */
-    _setupDragListeners () {
+    async _setupDragListeners () {
+        // Wait for engine initialize
+        await this.engine.delay(10);
+
+        const engine = this.engine;
         let hoveredEntity = null;
         let touchStartTime = 0;
         let touchStartPosition = {x: 0, y: 0};
@@ -1617,7 +1618,7 @@ class Physics {
         };
 
         // Mouse Events
-        this.engine.on('mousedown', (e) => {
+        engine.on('mousedown', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1644,7 +1645,7 @@ class Physics {
                 }
             }
         });
-        this.engine.on('mousemove', (e) => {
+        engine.on('mousemove', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1697,7 +1698,7 @@ class Physics {
                 }
             }
         });
-        this.engine.on('mouseup', (e) => {
+        engine.on('mouseup', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1722,7 +1723,7 @@ class Physics {
         });
 
         // Mouse wheel events
-        this.engine.on('wheel', (e) => {
+        engine.on('wheel', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1746,7 +1747,7 @@ class Physics {
         });
 
         // Touch Events
-        this.engine.on('touchstart', (e) => {
+        engine.on('touchstart', (e) => {
             if (!this.engine.running) return;
 
             touchStartTime = Date.now();
@@ -1779,7 +1780,7 @@ class Physics {
                 }
             }
         });
-        this.engine.on('touchmove', (e) => {
+        engine.on('touchmove', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1812,7 +1813,7 @@ class Physics {
                 }
             }
         });
-        this.engine.on('touchend', (e) => {
+        engine.on('touchend', (e) => {
             if (!this.engine.running) return;
 
             const currentTime = Date.now();
@@ -1854,7 +1855,7 @@ class Physics {
                 this._endDrag(e.identifier);
             }
         });
-        this.engine.on('touchcancel', (e) => {
+        engine.on('touchcancel', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1878,7 +1879,7 @@ class Physics {
         });
 
         // Click events (separate from touch/mouse)
-        this.engine.on('click', (e) => {
+        engine.on('click', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -1897,7 +1898,7 @@ class Physics {
                 }
             }
         });
-        this.engine.on('rightclick', (e) => {
+        engine.on('rightclick', (e) => {
             if (!this.engine.running) return;
 
             const rect = this.canvas.getBoundingClientRect();
@@ -2072,7 +2073,7 @@ class Physics {
 
             for (const [entityId, body] of this.bodies) {
                 // Stop moving
-                pixalo.find(entityId).halt();
+                body.m_userData?.halt?.();
 
                 // Destroy body
                 this.world.DestroyBody(body);

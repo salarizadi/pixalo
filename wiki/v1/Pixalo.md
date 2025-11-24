@@ -383,320 +383,6 @@ game.resize(1024, 768);
 
 ---
 
-## [Background](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Background.md) Management
-
-### `addBackground(source, config = {})`: Pixalo
-
-Adds a background layer with specified source and configuration.
-
-| Name   | Type          | Default |
-|--------|---------------|---------|
-| source | String\|Image | -       |
-| config | Object        | {}      |
-
-**Usage Examples:**
-
-```javascript
-// Simple background
-game.addBackground('background.jpg');
-
-// Background with configuration
-game.addBackground('sky', {
-    id: 'sky',
-    parallax: 0.5,
-    repeat: true
-});
-```
-
-### `removeBackground(layerId)`: Pixalo
-
-Removes a background layer by its ID.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.removeBackground('sky');
-```
-
-### `updateBackground(layerId, config)`: Pixalo
-
-Updates configuration of an existing background layer.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-| config  | Object | -       |
-
-**Usage Examples:**
-
-```javascript
-game.updateBackground('sky', {
-    parallax: 0.8,
-    opacity: 0.5
-});
-```
-
-### `clearBackgrounds()`: Pixalo
-
-Removes all background layers.
-
-**Usage Examples:**
-
-```javascript
-game.clearBackgrounds();
-```
-
-### `getBackground(layerId)`: Object | undefined
-
-Retrieves a background layer by its ID.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-
-**Usage Examples:**
-
-```javascript
-const skyLayer = game.getBackground('sky');
-```
-
-### `setBackgroundOrder(layerId, zIndex)`: Pixalo
-
-Sets the rendering order of a background layer.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-| zIndex  | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setBackgroundOrder('mountains', 1);
-game.setBackgroundOrder('clouds', 2);
-```
-
-### `setBackgroundVisible(layerId, visible)`: Pixalo
-
-Sets the visibility of a background layer.
-
-| Name    | Type    | Default |
-|---------|---------|---------|
-| layerId | String  | -       |
-| visible | Boolean | -       |
-
-**Usage Examples:**
-
-```javascript
-// Hide background
-game.setBackgroundVisible('rain', false);
-// Show background
-game.setBackgroundVisible('rain', true);
-```
-
----
-
-## [Grid](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Grid.md) System
-
-### `enableGrid()`: Pixalo
-
-Enables the grid system for rendering.
-
-**Usage Examples:**
-
-```javascript
-game.enableGrid();
-```
-
-### `disableGrid()`: Pixalo
-
-Disables the grid system rendering.
-
-**Usage Examples:**
-
-```javascript
-game.disableGrid();
-```
-
-### `toggleGrid()`: Pixalo
-
-Toggles the grid system on/off.
-
-**Usage Examples:**
-
-```javascript
-// Toggle grid visibility
-game.toggleGrid();
-```
-
-### `setGridSize(width, height = width)`: Pixalo
-
-Sets the size of grid cells.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| width  | Number | -       |
-| height | Number | width   |
-
-**Usage Examples:**
-
-```javascript
-// Square grid cells (32x32)
-game.setGridSize(32);
-
-// Rectangular grid cells (32x64)
-game.setGridSize(32, 64);
-```
-
-### `setGridColors(color, majorColor)`: Pixalo
-
-Sets the colors for grid lines and major grid lines.
-
-| Name       | Type   | Default |
-|------------|--------|---------|
-| color      | String | -       |
-| majorColor | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridColors('#cccccc', '#333333');
-```
-
-### `setGridLineWidth(lineWidth, majorLineWidth)`: Pixalo
-
-Sets the line width for grid lines and major grid lines.
-
-| Name           | Type   | Default |
-|----------------|--------|---------|
-| lineWidth      | Number | -       |
-| majorLineWidth | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridLineWidth(1, 2);
-```
-
-### `setMajorGrid(every, color, lineWidth)`: Pixalo
-
-Configures major grid lines that appear every N cells.
-
-| Name      | Type   | Default |
-|-----------|--------|---------|
-| every     | Number | -       |
-| color     | String | -       |
-| lineWidth | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-// Major grid line every 10 cells
-game.setMajorGrid(10, '#ff0000', 3);
-```
-
-### `setGridBounds(bounds)`: Pixalo
-
-Sets the boundaries where grid should be rendered.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| bounds | Object | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridBounds({
-    x: 0, y: 0,
-    width: 1000, height: 800
-});
-```
-
-### `setGridOrigin(x, y)`: Pixalo
-
-Sets the origin point for grid rendering.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridOrigin(100, 100);
-```
-
-### `setGridVisibilityRange(minZoom, maxZoom)`: Pixalo
-
-Sets the zoom range where grid is visible.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| minZoom | Number | -       |
-| maxZoom | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-// Grid visible between 0.5x and 2x zoom
-game.setGridVisibilityRange(0.5, 2);
-```
-
-### `snapToGrid(x, y)`: Object
-
-Snaps coordinates to the nearest grid intersection.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const snapped = game.snapToGrid(157, 243);
-// Returns nearest grid coordinates
-```
-
-### `getGridCell(x, y)`: Object
-
-Gets the grid cell coordinates for given world coordinates.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const cell = game.getGridCell(100, 200);
-// Returns {x: cellX, y: cellY}
-```
-
-### `cellToWorld(cellX, cellY)`: Object
-
-Converts grid cell coordinates to world coordinates.
-
-| Name  | Type   | Default |
-|-------|--------|---------|
-| cellX | Number | -       |
-| cellY | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const worldPos = game.cellToWorld(5, 10);
-// Returns world coordinates for cell (5, 10)
-```
-
----
-
 ## Game Loop Control
 
 ### `startLoop()`: void
@@ -949,92 +635,6 @@ Logs error message to console (only when debugger is active).
 
 ```javascript
 game.error('Failed to load asset:', assetId);
-```
-
----
-
-## Asset Management
-
-### `loadAsset(type, id, src, config = {})` (async): Promise<Object>
-
-Loads an asset (image, spritesheet, tiles, or audio) asynchronously.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| type   | String | -       |
-| id     | String | -       |
-| src    | String | -       |
-| config | Object | {}      |
-
-**Usage Examples:**
-
-```javascript
-// Load image
-await game.loadAsset('image', 'player', 'path/player.png');
-
-// Load spritesheet
-await game.loadAsset('spritesheet', 'character', 'path/char.png', {
-    columns: 4, rows: 2, width: 32, height: 32,
-    originOffset: [0, 0],
-    margin: [2, 2]
-});
-
-// Load tileset
-await game.loadAsset('tiles', 'terrain', 'path/tiles.png', {
-    tileSize: 32,
-    tiles: {
-        grass: [0, 0],
-        stone: [1, 0],
-        water: [2, 0]
-    }
-});
-
-// Load audio
-await game.loadAsset('audio', 'bgm', 'music.mp3', {
-    loop: true, volume: 0.8
-});
-```
-
-### `getAsset(id)`: Object | null
-
-Retrieves a loaded asset by its ID.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| id   | String | -       |
-
-**Usage Examples:**
-
-```javascript
-const playerAsset = game.getAsset('player');
-if (playerAsset) {
-    console.log('Asset loaded:', playerAsset.asset);
-}
-```
-
-### `deleteAsset(id)`: Pixalo
-
-Removes an asset from memory.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| id   | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.deleteAsset('old-texture');
-```
-
-### `clearAssets()`: Pixalo
-
-Removes all loaded assets from memory.
-
-**Usage Examples:**
-
-```javascript
-// Clear all assets (useful for level transitions)
-game.clearAssets();
 ```
 
 ---
@@ -1539,6 +1139,146 @@ const fadedHex = game.adjustAlpha('#ff6432', 0.3);
 
 ---
 
+## Animation Utilities
+
+### `animate(callback, options)`: Object
+
+Creates a pause-aware animation loop that automatically handles engine pause/resume states. Returns a control object for managing the animation.
+
+| Name     | Type     | Default | Description                                    |
+|----------|----------|---------|------------------------------------------------|
+| callback | Function | -       | Animation function called each frame           |
+| options  | Object   | {}      | Optional configuration object                  |
+
+**Callback Parameters:**
+
+The callback receives an object with timing information:
+
+| Property   | Type    | Description                                    |
+|------------|---------|------------------------------------------------|
+| now        | Number  | Adjusted timestamp (excluding pause time)      |
+| elapsed    | Number  | Time elapsed since animation start (ms)        |
+| rawNow     | Number  | Raw timestamp from performance.now()           |
+| totalPause | Number  | Total accumulated pause duration (ms)          |
+| isPaused   | Boolean | Current pause state (always false in callback) |
+
+**Options:**
+
+| Property   | Type     | Default | Description                           |
+|------------|----------|---------|---------------------------------------|
+| onPause    | Function | null    | Called when engine pauses             |
+| onResume   | Function | null    | Called when engine resumes            |
+| onCancel   | Function | null    | Called when animation is cancelled    |
+
+**Return Value:**
+
+Returns a control object with the following methods:
+
+| Method          | Returns | Description                              |
+|-----------------|---------|------------------------------------------|
+| cancel()        | void    | Stops and cancels the animation          |
+| getElapsed()    | Number  | Gets elapsed time in milliseconds        |
+| getTotalPause() | Number  | Gets total pause duration                |
+| isPaused()      | Boolean | Checks if animation is currently paused  |
+
+**Usage Examples:**
+
+```javascript
+// Basic animation loop
+const anim = game.animate(({elapsed}) => {
+    console.log('Elapsed:', elapsed);
+    
+    if (elapsed > 5000) {
+        return false; // Stop after 5 seconds
+    }
+    return true; // Continue
+});
+
+// With pause/resume callbacks
+const anim = game.animate(({elapsed}) => {
+    entity.x += 2;
+    return entity.x < 500;
+}, {
+    onPause: () => console.log('Animation paused'),
+    onResume: (now, totalPause) => console.log('Resumed after', totalPause, 'ms'),
+    onCancel: () => console.log('Animation cancelled')
+});
+
+// Manual control
+anim.cancel(); // Stop the animation
+console.log(anim.getElapsed()); // Get elapsed time
+console.log(anim.isPaused()); // Check pause state
+
+// Animated movement
+const anim = game.animate(({elapsed}) => {
+    const progress = elapsed / 2000; // 2 second duration
+    
+    if (progress >= 1) {
+        entity.x = 500;
+        return false; // Complete
+    }
+    
+    entity.x = 100 + (400 * progress);
+    return true; // Continue
+});
+```
+
+**Notes:**
+- The callback should return `true` to continue or `false` to stop
+- Animation automatically pauses when `engine.running` is `false`
+- Pause time is excluded from elapsed time calculations
+- Use this instead of `requestAnimationFrame` for pause-aware animations
+
+---
+
+## World Game Utilities
+
+### `worldSize(type)`: Object
+
+Returns width and height dimensions based on the specified type.
+
+| Name | Type   | Default  | Description                                       |
+|------|--------|----------|---------------------------------------------------|
+| type | String | 'bounds' | Size type: 'bounds', 'viewport', 'base', 'canvas' |
+
+**Return Value:**
+
+Returns an object with `width` and `height` properties.
+
+**Size Types:**
+
+| Type     | Description                                           |
+|----------|-------------------------------------------------------|
+| bounds   | Camera bounds size (falls back to base if no bounds)  |
+| viewport | Visible area size adjusted for camera zoom            |
+| base     | Base canvas dimensions (logical size)                 |
+| canvas   | Actual canvas element dimensions (physical size)      |
+
+**Usage Examples:**
+
+```javascript
+// Get camera bounds size
+const bounds = engine.worldSize('bounds');
+// Returns: {width: 2000, height: 1500}
+
+// Get visible viewport size (affected by zoom)
+const viewport = engine.worldSize('viewport');
+// Returns: {width: 800, height: 600} (at zoom 1.0)
+
+// Get base canvas size
+const base = engine.worldSize('base');
+// Returns: {width: 800, height: 600}
+
+// Get actual canvas element size
+const canvas = engine.worldSize('canvas');
+// Returns: {width: 1600, height: 1200} (if scaled)
+
+// Default is 'bounds'
+const size = engine.worldSize();
+```
+
+---
+
 ## Mathematical Utilities
 
 ### `getDistance(x1, y1, x2, y2)`: Number
@@ -1701,8 +1441,8 @@ Waits for multiple promises to complete and returns their results.
 ```javascript
 // Wait for multiple asset loads
 const results = await game.wait(
-    game.loadAsset('image', 'player', 'player.png'),
-    game.loadAsset('audio', 'bgm', 'music.mp3'),
+    game.assets.load('image', 'player', 'player.png'),
+    game.assets.load('audio', 'bgm', 'music.mp3'),
     game.delay(1000)
 );
 
@@ -1839,6 +1579,7 @@ game.on('shift+ctrl+z', () => console.log('Redo'));
 - `ready` - Engine initialized
 - `start` - Game loop started
 - `stop` - Game loop stopped
+- `stop` - Game loop stopped
 - `reset` - Engine reset
 - `resize` - Canvas resized
 - `visibility` - Tab visibility changed
@@ -1846,6 +1587,8 @@ game.on('shift+ctrl+z', () => console.log('Redo'));
 - `render` - Render frame
 - `beforeRender` - Before rendering starts
 - `afterRender` - Triggered after all rendering is complete
+- `freeze` - Game update & timers stopped
+- `unfreeze` - Game update & timers started
 
 ### Worker Events (Worker Mode Only)
 

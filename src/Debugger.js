@@ -189,7 +189,7 @@ class Debugger {
         const ctx = this.engine.ctx;
         const padding = 0;
         const lineHeight = 18;
-        const sectionSpacing = 20;
+        const sectionSpacing = 18;
         let y = padding + 20;
 
         let totalEntities = 0;
@@ -205,6 +205,11 @@ class Debugger {
             entity.children.forEach(countEntities);
         };
         this.engine.entities.forEach(countEntities);
+
+        for (const [, scene] of this.engine.scenes) {
+            if (!scene.running) continue;
+            scene.entities.forEach(countEntities);
+        }
 
         ctx.save();
 
@@ -253,6 +258,27 @@ class Debugger {
         ctx.fillText(`${this.engine.canvas.width}×${this.engine.canvas.height}`, padding + 65, y);
         y += lineHeight + sectionSpacing;
 
+        // Scene Section
+        ctx.font = 'bold 14px "Consolas", "Monaco", monospace';
+        ctx.fillStyle = '#F3A71B';
+        ctx.fillText('🎬 SCENES', padding + 2, y);
+        y += sectionSpacing;
+
+        ctx.font = '12px "Consolas", "Monaco", monospace';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(`Total: `, padding + 8, y);
+        ctx.fillStyle = '#8FE5D4';
+        ctx.fillText(`${this.engine.scenes.size}`, padding + 55, y);
+        y += lineHeight;
+
+        const activeScenes = [...this.engine.scenes.values()].filter(scene => scene.running).length;
+        ctx.font = '12px "Consolas", "Monaco", monospace';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(`Active: `, padding + 8, y);
+        ctx.fillStyle = '#8FE5D4';
+        ctx.fillText(`${activeScenes}`, padding + 60, y);
+        y += lineHeight + sectionSpacing;
+
         // Grid Section
         ctx.font = 'bold 14px "Consolas", "Monaco", monospace';
         ctx.fillStyle = '#F3A71B';
@@ -262,10 +288,12 @@ class Debugger {
         ctx.font = '12px "Consolas", "Monaco", monospace';
         ctx.fillStyle = '#FFFFFF';
         ctx.fillText(`Status: `, padding + 8, y);
-        ctx.fillStyle = this.engine.gridEnabled ? '#4AFF4A' : '#666666';
-        ctx.fillText(`${this.engine.gridEnabled ? 'ON' : 'OFF'}`, padding + 60, y);
+        ctx.fillStyle = this.engine.grid.enabled ? '#4AFF4A' : '#666666';
+        ctx.fillText(`${this.engine.grid.enabled ? 'ON' : 'OFF'}`, padding + 60, y);
 
-        if (this.engine.gridEnabled) {
+        if (this.engine.grid.enabled) {
+            y += sectionSpacing;
+
             ctx.fillStyle = '#FFFFFF';
             ctx.fillText(`Size: `, padding + 8, y);
             ctx.fillStyle = '#8FE5D4';
@@ -276,9 +304,7 @@ class Debugger {
             ctx.fillText(`Major: `, padding + 8, y);
             ctx.fillStyle = '#8FE5D4';
             ctx.fillText(`${this.engine.grid.majorGridEvery}`, padding + 50, y);
-            y += lineHeight;
         }
-
         y += lineHeight + sectionSpacing;
 
         // Entities Section

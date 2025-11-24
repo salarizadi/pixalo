@@ -95,29 +95,35 @@ class Camera {
             return this;
         }
 
+        // Cancel previous camera movement
+        if (this._cameraAnimation) {
+            this._cameraAnimation.cancel();
+            this._cameraAnimation = null;
+        }
+
         // Moving with animation
         const startX = this.x;
         const startY = this.y;
-        const startTime = Date.now();
 
         this.smoothing = false;
         easing = typeof easing === 'function' ? easing : this.engine.Ease[easing] || this.engine.Ease['easeInOutCubic'];
 
-        const animate = () => {
-            const progress = Math.min((Date.now() - startTime) / duration, 1);
+        this._cameraAnimation = this.engine.animate(({elapsed}) => {
+            const progress = Math.min(elapsed / duration, 1);
             const t = easing(progress);
 
             this.x = this._targetX = startX + (x - startX) * t;
             this.y = this._targetY = startY + (y - startY) * t;
 
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
+            if (progress >= 1) {
                 this.smoothing = true;
+                this._cameraAnimation = null;
+                return false;
             }
-        };
 
-        animate();
+            return true;
+        });
+
         return this;
     }
     moveBy (dx, dy = 0, instant = false, duration = 500, easing = 'easeInOutCubic') {
@@ -148,7 +154,6 @@ class Camera {
         const startZoom = this.zoom;
         const startX = this.x;
         const startY = this.y;
-        const startTime = Date.now();
 
         // Calculating the new position while preserving the zoom point
         const startViewportWidth = this.engine.baseWidth / startZoom;
@@ -187,9 +192,7 @@ class Camera {
 
         easing = typeof easing === 'function' ? easing : this.engine.Ease[easing] || this.engine.Ease['easeInOutCubic'];
 
-        const animate = () => {
-            const currentTime = Date.now();
-            const elapsed = currentTime - startTime;
+        this.engine.animate(({elapsed}) => {
             const progress = Math.min(elapsed / duration, 1);
             const easeProgress = easing(progress);
 
@@ -236,14 +239,14 @@ class Camera {
             this._targetX = this.x;
             this._targetY = this.y;
 
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
+            if (progress >= 1) {
                 this.smoothing = originalSmoothing;
+                return false;
             }
-        };
 
-        animate();
+            return true;
+        });
+
         return this;
     }
     zoomToLevel (zoom, centerX = null, centerY = null, duration = 500, easing = 'easeInOutCubic') {
@@ -272,36 +275,35 @@ class Camera {
 
         // Rotation with animation
         const startRotation = this.rotation;
-        const startTime = Date.now();
 
         // Disable temporary softening
         this.smoothing = false;
         easing = typeof easing === 'function' ? easing : this.engine.Ease[easing] || this.engine.Ease['easeInOutCubic'];
 
-        const animate = () => {
-            const progress = Math.min((Date.now() - startTime) / duration, 1);
-            const t = easing(progress);
-
-            // Calculating the shortest turning path
-            let diff = angle - startRotation;
-            if (Math.abs(diff) > 180) {
-                if (diff > 0) {
-                    diff -= 360;
-                } else {
-                    diff += 360;
-                }
+        // Calculating the shortest turning path
+        let diff = angle - startRotation;
+        if (Math.abs(diff) > 180) {
+            if (diff > 0) {
+                diff -= 360;
+            } else {
+                diff += 360;
             }
+        }
+
+        this.engine.animate(({elapsed}) => {
+            const progress = Math.min(elapsed / duration, 1);
+            const t = easing(progress);
 
             this.rotation = this._targetRotation = startRotation + diff * t;
 
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
+            if (progress >= 1) {
                 this.smoothing = true;
+                return false;
             }
-        };
 
-        animate();
+            return true;
+        });
+
         return this;
     }
     rotateBy (deltaAngle, instant = false, duration = 500, easing = 'easeInOutCubic') {
@@ -370,9 +372,12 @@ class Camera {
     }
     /** ======== END ======== */
 
-    apply () {
+    apply (save = true) {
         const ctx = this.engine.ctx;
-        ctx.save();
+
+        if (save)
+            ctx.save();
+
         ctx.translate(this.engine.baseWidth / 2, this.engine.baseHeight / 2);
         ctx.rotate(this.rotation * Math.PI / 180);
         ctx.scale(this.zoom, this.zoom);

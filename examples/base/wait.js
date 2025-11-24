@@ -19,18 +19,18 @@ game.start();
 // Wait for multiple asset loads
 const results = await game.wait(
     game.delay(1000),
-    game.loadAsset('image', 'player', 'player.png'),
-    game.loadAsset('audio', 'bgm', 'music.mp3'),
+    game.assets.load('image', 'player', 'player.png'),
+    game.assets.load('audio', 'bgm', 'music.mp3'),
 );
 
-const promise1 = game.loadAsset('image', 'background', 'bg.jpg');
+const promise1 = game.assets.load('image', 'background', 'bg.jpg');
 const promise2 = new Promise((resolve) => {
     game.timeout(() => {
         console.log('Animation setup complete');
         resolve('animation-ready');
     }, 500);
 });
-const promise3 = game.loadAsset('audio', 'jumpSound', 'jump.wav');
+const promise3 = game.assets.load('audio', 'jumpSound', 'jump.wav');
 const promise4 = fetch('/api/player-stats')
     .then(response => response.json())
     .then(data => {

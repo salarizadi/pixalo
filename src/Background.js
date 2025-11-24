@@ -23,7 +23,7 @@ class Background {
             id: layerId,
             source: source,
             sourceType: sourceType,
-            asset: sourceType === 'asset' ? this.engine.getAsset(source) : null,
+            asset: sourceType === 'asset' ? this.engine.assets.get(source) : null,
 
             // Size
             width:  config.width  || null,
@@ -129,7 +129,6 @@ class Background {
             layer._currentOffset.y += layer.speed.y * (deltaTime / 1000);
         });
     }
-
     _renderLayers (ctx, top = false) {
         // Get sorted layers by zIndex
         const sortedLayers = Array.from(this.layers.values())
@@ -143,30 +142,47 @@ class Background {
     _renderLayer (ctx, layer) {
         ctx.save();
 
-        // Apply opacity
-        if (layer.opacity < 1) {
-            ctx.globalAlpha = layer.opacity;
+        // Apply bounds clipping if exists
+        const {x: bx, y: by, width: bw, height: bh} = this.engine?.bounds || {};
+        if (this.engine.isScene && this.engine?.bounds) {
+            // Create clipping rectangle for bounds
+            ctx.beginPath();
+            ctx.rect(bx, by, bw, bh);
+            ctx.clip();
         }
 
+        // Apply opacity
+        if (layer.opacity < 1)
+            ctx.globalAlpha = layer.opacity;
+
         // Get camera properties
-        const camera = this.engine.camera;
+        const camera  = this.engine.camera;
         const cameraX = Math.floor(camera.x);
         const cameraY = Math.floor(camera.y);
-        const viewportWidth = this.engine.baseWidth / camera.zoom;
-        const viewportHeight = this.engine.baseHeight / camera.zoom;
+
+        // Use bounds dimensions if available, otherwise use base dimensions
+        const viewportWidth  = bw !== undefined ? bw / camera.zoom : this.engine.baseWidth / camera.zoom;
+        const viewportHeight = bh !== undefined ? bh / camera.zoom : this.engine.baseHeight / camera.zoom;
 
         // Calculate parallax offset (opposite direction for background effect)
         const parallaxOffsetX = cameraX * (1 - layer.parallaxX);
         const parallaxOffsetY = cameraY * (1 - layer.parallaxY);
 
-        // Calculate final layer position in world coordinates
-        const layerWorldX = layer.x + parallaxOffsetX + layer.offset.x + layer._currentOffset.x;
-        const layerWorldY = layer.y + parallaxOffsetY + layer.offset.y + layer._currentOffset.y;
+        // Calculate final layer position - constrain to bounds if available
+        const baseLayerX = layer.x + parallaxOffsetX + layer.offset.x + layer._currentOffset.x;
+        const baseLayerY = layer.y + parallaxOffsetY + layer.offset.y + layer._currentOffset.y;
+
+        const layerWorldX = bx !== undefined ? bx + baseLayerX : baseLayerX;
+        const layerWorldY = by !== undefined ? by + baseLayerY : baseLayerY;
+
+        // Adjust camera position relative to bounds
+        const effectiveCameraX = bx !== undefined ? Math.max(bx, Math.min(cameraX, bx + bw)) : cameraX;
+        const effectiveCameraY = by !== undefined ? Math.max(by, Math.min(cameraY, by + bh)) : cameraY;
 
         if (layer.sourceType === 'color') {
-            this._renderColorBackground(ctx, layer, layerWorldX, layerWorldY, cameraX, cameraY, viewportWidth, viewportHeight);
+            this._renderColorBackground(ctx, layer, layerWorldX, layerWorldY, effectiveCameraX, effectiveCameraY, viewportWidth, viewportHeight);
         } else if (layer.sourceType === 'asset' && layer.asset) {
-            this._renderImageBackground(ctx, layer, layerWorldX, layerWorldY, cameraX, cameraY, viewportWidth, viewportHeight);
+            this._renderImageBackground(ctx, layer, layerWorldX, layerWorldY, effectiveCameraX, effectiveCameraY, viewportWidth, viewportHeight);
         }
 
         ctx.restore();
@@ -174,8 +190,14 @@ class Background {
     _renderColorBackground (ctx, layer, layerWorldX, layerWorldY, cameraX, cameraY, viewportWidth, viewportHeight) {
         ctx.fillStyle = layer.source;
 
+        if (this.engine.isScene && this.engine.bounds) {
+            const {x, y, width, height} = this.engine.bounds;
+            ctx.fillRect(layer.x + x, layer.y + y, layer.width ?? width, layer.height ?? height);
+            return;
+        }
+
         // Fill the entire visible viewport in world coordinates
-        ctx.fillRect(cameraX, cameraY, viewportWidth, viewportHeight);
+        ctx.fillRect(layerWorldX, layerWorldY, layer.width ?? viewportWidth, layer.height ?? viewportHeight);
     }
     _renderImageBackground (ctx, layer, layerWorldX, layerWorldY, cameraX, cameraY, viewportWidth, viewportHeight) {
         const asset = layer.asset.asset;
@@ -250,7 +272,7 @@ class Background {
     /** ======== END ======== */
 
     _detectSourceType (source) {
-        if (this.engine.getAsset(source))
+        if (this.engine.assets.get(source))
             return 'asset';
 
         // Check if it's a color (hex, rgb, rgba, hsl, hsla, named colors)

@@ -18,11 +18,11 @@ globalThis.pixalo = new Pixalo({
 
 pixalo.on('ready', async () => {
     await pixalo.wait(
-        pixalo.loadAsset('image', 'background', 'assets/images/background.png'),
-        pixalo.loadAsset('image', 'circle', 'assets/images/circle.png'),
-        pixalo.loadAsset('image', 'knife', 'assets/images/knife.png'),
-        pixalo.loadAsset('audio', 'throw', 'assets/sounds/throw.mp3'),
-        pixalo.loadAsset('audio', 'hit', 'assets/sounds/hit.mp3', {
+        pixalo.assets.load('image', 'background', 'assets/images/background.png'),
+        pixalo.assets.load('image', 'circle', 'assets/images/circle.png'),
+        pixalo.assets.load('image', 'knife', 'assets/images/knife.png'),
+        pixalo.assets.load('audio', 'throw', 'assets/sounds/throw.mp3'),
+        pixalo.assets.load('audio', 'hit', 'assets/sounds/hit.mp3', {
             volume: 0.8
         }),
     );

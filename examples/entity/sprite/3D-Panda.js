@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('spritesheet', '3D_panda', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/3D-panda.webp', {
+await game.assets.load('spritesheet', '3D_panda', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/3D-panda.webp', {
     width: 596,
     height: 596,
     columns: 5,

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## [1.3.0] - 2025-11
+
+### `Pixalo` class
+- addBackground,removeBackground,updateBackground,clearBackgrounds,getBackground,setBackgroundOrder,setBackgroundVisible
+- enableGrid,disableGrid,toggleGrid,setGridSize,setGridColors,setGridLineWidth,setMajorGrid,setGridBounds,setGridOrigin,setGridVisibilityRange,snapToGrid,getGridCell,cellToWorld
+
+---
+
 ## [1.2.0] - 2025-10-31
 
 ### 🔧 Issues Resolved

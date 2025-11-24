@@ -18,21 +18,24 @@ A powerful and flexible 2D game engine built with JavaScript, designed for creat
 
 ## ✨ Features
 - 🎯 High-performance 2D rendering system
-- 🎚️ Quality control and scaling
+- 🧩 Intuitive API that scales from first-time coders to seasoned pros
 - 📱️ Mobile friendly
-- 🎵 Audio management with spatial controls
-- 📹 Camera system with zoom, rotation, and cinematic presets
+- 🎚️ Quality control and scaling
+- 🧵 Multi-threaded WebWorker support for parallel processing
+- 🎬 Nested scene rendering with simultaneous multi-layer support
 - 💥 Collision detection system
 - ⚙️ Physics support powered by the legendary [Box2D](https://box2d.org/)
 - 🏃 Advanced animation support with keyframes
-- 🎨 Background layer management
-- 📐 Grid system with customizable properties
-- 🔄 Sprite sheet and asset management
+- 🎵 Audio management with 3D spatial controls
+- 📹 Camera system with zoom, rotation, and cinematic presets
 - 🗺️ Tile map system for level design
+- 🎨 Background layer management
+- 🔄 Sprite sheet and asset management
 - 🎆 Particle emitter system
-- 📸 Screenshot functionality
+- 📐 Grid system with customizable properties
 - 🖱️ Support for touch, click, wheel, and mouse events
 - ⌨️ Support for physical and logical keyboard events
+- 📸 Screenshot functionality
 - 🐞 Built-in debugging tools
 
 ## 📚 Documentation
