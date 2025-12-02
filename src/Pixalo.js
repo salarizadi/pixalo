@@ -213,6 +213,7 @@ class Pixalo extends Utils {
         }
     }
 
+    /** ======== WORKER ======== */
     #setupWorker (config) {
         if (typeof DedicatedWorkerGlobalScope === 'undefined')
             throw new Error('Please run Pixalo in the Worker environment.');
@@ -244,16 +245,39 @@ class Pixalo extends Utils {
                 action: 'ready'
             });
 
-            this.on('worker_msg', this.audio._handleWorker);
+            this.on('worker_msg', this.audio._handleWorker, {removeable: false});
         });
     }
+    async workerSend (data = {}, wait_for = null, callback = null) {
+        if (!this.config.worker) return this;
+        const rootParent = this.rootParent();
 
+        postMessage({
+            wid: rootParent.config.worker,
+            ...data
+        });
+
+        if (wait_for && typeof callback === 'function') {
+            const _callback = event => {
+                if (event.data.action === wait_for) {
+                    callback(event);
+                    rootParent.off('worker_msg', _callback);
+                }
+            };
+            rootParent.on('worker_msg', _callback);
+        }
+
+        return this;
+    }
+    /** ======== END ======== */
+
+    /** ======== SETUP EVENT LISTENERS ======== */
     _setupEventListeners () {
         if (this.isScene) return;
 
         if (typeof window === 'undefined' || typeof document === 'undefined') {
             if (this.config.worker) {
-                this.on('worker_msg', this._workerEventListeners);
+                this.on('worker_msg', this._workerEventListeners, {removeable: false});
                 return;
             }
             this.warn('Browser environment is required. This feature is only available in browser context.');
@@ -373,28 +397,7 @@ class Pixalo extends Utils {
                 });
         }
     }
-
-    async workerSend (data = {}, wait_for = null, callback = null) {
-        if (!this.config.worker) return this;
-        const rootParent = this.rootParent();
-
-        postMessage({
-            wid: rootParent.config.worker,
-            ...data
-        });
-
-        if (wait_for && typeof callback === 'function') {
-            const _callback = event => {
-                if (event.data.action === wait_for) {
-                    callback(event);
-                    rootParent.off('worker_msg', _callback);
-                }
-            };
-            rootParent.on('worker_msg', _callback);
-        }
-
-        return this;
-    }
+    /** ======== END ======== */
 
     /** ======== QUALITY ======== */
     quality (value) {
@@ -420,73 +423,86 @@ class Pixalo extends Utils {
     /** ======== END ======== */
 
     /** ======== EVENTS ======== */
-    on (eventName, callback) {
+    on (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.on(event, callback);
-            })
+            eventName.forEach(e => this.on(e, callback, config));
             return this;
         }
         if (typeof eventName === 'object') {
-            for (const key in eventName) {
-                this.on(key, eventName[key]);
-            }
+            for (const k in eventName) this.on(k, eventName[k], config);
             return this;
         }
 
         if (!this.eventListeners.has(eventName))
             this.eventListeners.set(eventName, new Set());
-        this.eventListeners.get(eventName).add(callback);
+
+        this.eventListeners.get(eventName).add({cb: callback, cfg: config});
         return this;
     }
-    one (eventName, callback) {
+    one (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.one(event, callback);
-            });
+            eventName.forEach(e => this.one(e, callback, config));
             return this;
         }
-
         if (typeof eventName === 'object') {
-            for (const key in eventName)
-                this.one(key, eventName[key]);
+            for (const k in eventName) this.one(k, eventName[k], config);
             return this;
         }
 
-        const onceWrapper = (data) => {
-            callback.call(this, data);
+        const onceWrapper = (...args) => {
+            callback.apply(this, args);
             this.off(eventName, onceWrapper);
         };
 
-        this.on(eventName, onceWrapper);
+        this.on(eventName, onceWrapper, config);
         return this;
     }
     trigger (eventName, ...args) {
-        args = [...args, eventName];
+        args.push(eventName);
 
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.trigger(event, args);
-            })
+            eventName.forEach(e => this.trigger(e, ...args));
             return this;
         }
 
-        if (!this.eventListeners.has(eventName)) return this;
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
 
-        const listeners = this.eventListeners.get(eventName);
-        for (const callback of listeners)
-            callback.apply(this, args);
-
+        // We use Array.from to avoid errors if the listener is deleted during execution.
+        Array.from(set).forEach(({cb}) => cb.apply(this, args));
         return this;
     }
     off (eventName, callback) {
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => this.off(event, callback));
+            eventName.forEach(e => this.off(e, callback));
             return this;
         }
-        if (this.eventListeners.has(eventName))
-            this.eventListeners.get(eventName).delete(callback);
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        if (callback) {
+            for (const item of set) {
+                if (item.cb === callback) {
+                    set.delete(item);
+                    break;
+                }
+            }
+        } else {
+            set.clear();
+        }
         return this;
+    }
+    clearEvents () {
+        for (const [eventName, set] of this.eventListeners.entries()) {
+            for (const item of [...set])
+                if (item.cfg?.removeable !== false) set.delete(item);
+            if (set.size === 0) this.eventListeners.delete(eventName);
+        }
     }
     /** ======== END ======== */
 
@@ -579,7 +595,6 @@ class Pixalo extends Utils {
             timer.lastTime  = performance.now();
         });
         this.audio.resumeAll();
-        this.scenes.forEach(scene => scene.start());
         requestAnimationFrame(this.loop.bind(this));
         this.trigger('start');
         return this;
@@ -608,7 +623,6 @@ class Pixalo extends Utils {
             timer.isRunning = false;
         });
         this.audio.pauseAll();
-        this.scenes.forEach(scene => scene.stop());
         this.trigger('stop');
         return this;
     }
@@ -731,23 +745,40 @@ class Pixalo extends Utils {
         this.trigger('afterRender', ctx);
         ctx.restore();
     }
-    reset () {
+    reset (options = {}) {
+        options = {
+            assets    : true,
+            audio     : true,
+            animations: true,
+            scenes    : true,
+            ...options
+        };
         this.trigger('reset');
 
         // Stop the engine first
         this.stop();
 
         // Clear runtime data
+        this.freezed = false;
+        this.timers.clear();
         this.pressedKeys.clear();
+        this.clearEvents();
         this.entities.clear();
         (this.parent || this).clearSortedEntities();
-        this.eventListeners.clear();
-        this.timers.clear();
-        this.assets.clear();
 
         // Reset subsystems
+        this.debugger.clearItems();
+
+        if (options.assets)
+            this.assets.clear();
+
+        if (options.scenes)
+            this.scenes.clear();
+
         this.collision.reset();
-        this.audio.cleanup();
+
+        if (options.audio)
+            this.audio.cleanup();
 
         if (!this.isScene)
             this.camera.reset();
@@ -763,15 +794,9 @@ class Pixalo extends Utils {
         this.draggedEntity = null;
         this.draggedEntities.clear();
         this.hoveredEntity = null;
-        this.animations = {};
+        if (options.animations)
+            this.animations = {};
         this.lastTime = 0;
-
-        // Reset debugger
-        this.debugger.clearItems();
-
-        // Reset subsystem configurations to original config
-        this.physicsEnabled   = Boolean(this.config.physics);
-        this.collisionEnabled = Boolean(this.config.collision);
 
         // Reinitialize subsystems with original config
         this.background = new Background(this);
@@ -783,12 +808,14 @@ class Pixalo extends Utils {
         if (!this.isScene && this.tileMap)
             this.tileMap = new TileMap(this);
 
-        // Reset canvas and context
-        this.clear();
-        this._applyQuality(this.config.quality);
+        if (!this.isScene) {
+            // Reset canvas and context
+            this.clear();
+            this._applyQuality(this.config.quality);
 
-        // Reset canvas to original config
-        this._applyCanvasConfig();
+            // Reset canvas to original config
+            this._applyCanvasConfig();
+        }
 
         return this;
     }
@@ -830,15 +857,6 @@ class Pixalo extends Utils {
         };
 
         this.scenes.set(scene.id, scene);
-
-        // Events
-        // const rootParent = this.rootParent();
-        // rootParent.on([
-        //     'mousedown',  'mousemove', 'mouseup',
-        //     'touchstart', 'touchmove', 'touchend',
-        //     'click', 'wheel', 'contextmenu', 'keydown', 'keyup'
-        // ], function () {scene.trigger(arguments[arguments.length - 1], ...arguments)});
-
         return scene;
     }
     sortedScenes () {

@@ -40,7 +40,7 @@ await game.assets.load('audio', 'bgm', 'music.mp3', {
 });
 ```
 
-### `assets.get(id)`: Object | null
+### `get(id)`: Object | null
 
 Retrieves a loaded asset by its ID.
 

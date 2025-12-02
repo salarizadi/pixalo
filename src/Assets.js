@@ -168,7 +168,21 @@ class Assets {
 
     /** ======== MANAGEMENT ======== */
     get (id) {
-        return this.resources.get(id) || null;
+        const src = this.resources.get(id) || null;
+        if (src !== null) return src;
+
+        // Prevent infinite recursion by checking if we're already at root
+        if (!this.engine.parent) return null;
+
+        // Walk up the parent chain manually to avoid recursion
+        let current = this.engine.parent;
+        while (current) {
+            const asset = current.assets.resources.get(id);
+            if (asset) return asset;
+            current = current.parent;
+        }
+
+        return null;
     }
     delete (id) {
         this.resources.delete(id);

@@ -130,81 +130,96 @@ class Entity {
     }
 
     /** ======== EVENTS ======== */
-    on (eventName, callback) {
+    on (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.on(event, callback);
-            })
+            eventName.forEach(e => this.on(e, callback, config));
             return this;
         }
         if (typeof eventName === 'object') {
-            for (const key in eventName) {
-                this.on(key, eventName[key]);
-            }
+            for (const k in eventName) this.on(k, eventName[k], config);
             return this;
         }
-        if (!this.eventListeners.has(eventName)) {
+
+        if (!this.eventListeners.has(eventName))
             this.eventListeners.set(eventName, new Set());
-        }
-        this.eventListeners.get(eventName).add(callback);
+
+        this.eventListeners.get(eventName).add({cb: callback, cfg: config});
         return this;
     }
-    one (eventName, callback) {
+    one (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.one(event, callback);
-            });
+            eventName.forEach(e => this.one(e, callback, config));
             return this;
         }
-
         if (typeof eventName === 'object') {
-            for (const key in eventName)
-                this.one(key, eventName[key]);
+            for (const k in eventName) this.one(k, eventName[k], config);
             return this;
         }
 
-        const onceWrapper = (data) => {
-            callback.call(this, data);
+        const onceWrapper = (...args) => {
+            callback.apply(this, args);
             this.off(eventName, onceWrapper);
         };
 
-        this.on(eventName, onceWrapper);
+        this.on(eventName, onceWrapper, config);
+        return this;
+    }
+    trigger (eventName, ...args) {
+        args.push(eventName);
+
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.trigger(e, ...args));
+            return this;
+        }
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        // We use Array.from to avoid errors if the listener is deleted during execution.
+        Array.from(set).forEach(({cb}) => cb.apply(this, args));
         return this;
     }
     off (eventName, callback) {
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => this.off(event, callback));
+            eventName.forEach(e => this.off(e, callback));
             return this;
         }
-        if (this.eventListeners.has(eventName))
-            this.eventListeners.get(eventName).delete(callback);
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        if (callback) {
+            for (const item of set) {
+                if (item.cb === callback) {
+                    set.delete(item);
+                    break;
+                }
+            }
+        } else {
+            set.clear();
+        }
         return this;
     }
-    trigger (eventName, ...args) {
-        args = [...args, eventName];
-
-        if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.trigger(event, args);
-            })
-            return this;
+    clearEvents () {
+        for (const [eventName, set] of this.eventListeners.entries()) {
+            for (const item of [...set])
+                if (item.cfg?.removeable !== false) set.delete(item);
+            if (set.size === 0) this.eventListeners.delete(eventName);
         }
-
-        if (!this.eventListeners.has(eventName)) return this;
-
-        const listeners = this.eventListeners.get(eventName);
-        for (const callback of listeners)
-            callback.apply(this, args);
-        
-        return this;
     }
     /** ======== END ======== */
 
+    /** ======== STATE CHECKS ======== */
+    isChild () {return this.engine.isEntity(this.parent)}
     isHoverable () {return this.events.hoverable}
     isDraggable () {return this.events.draggable}
     isClickable () {return this.events.clickable}
     isInteractive () {return this.events.interactive}
-    isChild () {return this.engine.isEntity(this.parent)}
+    /** ======== END ======== */
 
     /** ======== ENTITIES ======== */
     append (childId, config = {}) {
@@ -573,6 +588,7 @@ class Entity {
             duration: 300,
             easing: 'linear',
             delay: 0,
+            repeat: false,
             onComplete: null,
             onUpdate: null,
             onPause: null,
@@ -596,9 +612,16 @@ class Entity {
             }
 
             const actualElapsed = elapsed - options.delay;
+            const cycleDuration = options.duration;
 
-            /* animation finished */
-            if (actualElapsed >= options.duration) {
+            /* check if animation should repeat */
+            const shouldRepeat = options.repeat;
+            const currentCycleElapsed = shouldRepeat
+                ? actualElapsed % cycleDuration
+                : actualElapsed;
+
+            /* animation finished (only for non-repeating) */
+            if (!shouldRepeat && actualElapsed >= cycleDuration) {
                 this.style(properties);
                 options.onComplete?.call(this);
                 this.unset('transitionAnimation');
@@ -606,7 +629,7 @@ class Entity {
             }
 
             /* interpolate and apply current frame */
-            const progress = actualElapsed / options.duration;
+            const progress = currentCycleElapsed / cycleDuration;
             const eased = ease(progress);
 
             const currentValues = {};
@@ -631,6 +654,18 @@ class Entity {
 
         // Store animation reference for cancellation
         this.data('transitionAnimation', animation);
+
+        return this;
+    }
+    stopTransition () {
+        const animation = this.data('transitionAnimation');
+        if (!animation) return this;
+
+        // Cancel the animation
+        animation.cancel();
+
+        // Clean up
+        this.unset('transitionAnimation');
 
         return this;
     }
@@ -792,7 +827,7 @@ class Entity {
     text (text) {
         if (typeof text === 'undefined')
             return this.styles.text;
-        this.styles.text = text;
+        this.styles.text = String(text);
         return this;
     }
     img (asset, properties = {}) {
@@ -1890,48 +1925,7 @@ class Entity {
     }
     /** ======== END ======== */
 
-    kill () {
-        Promise.resolve().then(() => this._destroy());
-    }
-    _destroy () {
-        if (!this.engine) return false;
-
-        this.halt();
-
-        if (this.engine.physics && this.physics)
-            this.engine.physics.removeEntity(this);
-
-        if (this.engine.draggedEntity === this) this.engine.draggedEntity = null;
-        if (this.engine.hoveredEntity === this) this.engine.hoveredEntity = null;
-
-        if (this.engine.collisionEnabled && this.collision?.enabled)
-            this.engine.collision.remove(this);
-
-        if (this.parent)
-            this.parent.children.delete(this.id);
-        else
-            this.engine.entities.delete(this.id);
-
-        this.children.forEach(child => child.kill());
-
-        this.engine.rootParent(engine => engine.clearSortedEntities());
-
-        this.trigger('kill');
-        this.engine.trigger('kill', this.id);
-
-        // Clear all references
-        this.engine.debugger.removeItem(this.id);
-        this.parent = null;
-        this.engine = null;
-        this.children.clear();
-        this.eventListeners.clear();
-        this.animationStates.clear();
-        this.dataset.clear();
-        this.class.clear();
-
-        return true;
-    }
-
+    /** ======== BACKGROUND ======== */
     #normalizeBackground (config = {}) {
         const background = {};
 
@@ -1994,6 +1988,51 @@ class Entity {
 
         return null;
     }
+    /** ======== END ======== */
+
+    /** ======== DESTROY ======== */
+    kill () {
+        Promise.resolve().then(() => this._destroy());
+    }
+    _destroy () {
+        if (!this.engine) return false;
+
+        this.halt();
+
+        if (this.engine.physics && this.physics)
+            this.engine.physics.removeEntity(this);
+
+        if (this.engine.draggedEntity === this) this.engine.draggedEntity = null;
+        if (this.engine.hoveredEntity === this) this.engine.hoveredEntity = null;
+
+        if (this.engine.collisionEnabled && this.collision?.enabled)
+            this.engine.collision.remove(this);
+
+        if (this.parent)
+            this.parent.children.delete(this.id);
+        else
+            this.engine.entities.delete(this.id);
+
+        this.children.forEach(child => child.kill());
+
+        this.engine.rootParent(engine => engine.clearSortedEntities());
+
+        this.trigger('kill');
+        this.engine.trigger('kill', this.id);
+
+        // Clear all references
+        this.engine.debugger.removeItem(this.id);
+        this.parent = null;
+        this.engine = null;
+        this.children.clear();
+        this.eventListeners.clear();
+        this.animationStates.clear();
+        this.dataset.clear();
+        this.class.clear();
+
+        return true;
+    }
+    /** ======== END ======== */
 
 }
 

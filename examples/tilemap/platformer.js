@@ -17,7 +17,7 @@ const px = new Pixalo('#canvas', {
         zoom: 3
     },
     physics: {
-        gravity: {x: 0, y: 250}
+        gravity: {x: 0, y: 800}
     }
 });
 px.start();

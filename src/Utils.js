@@ -37,9 +37,12 @@ class Utils {
 
     /** ======== RESIZE ======== */
     resize (width, height, trigger = true, target = null) {
+        width  = width  || 0;
+        height = height || 0;
+
         if (this.isScene) {
-            this.bounds.width  = this.parseInt(width, this.bounds.width);
-            this.bounds.height = this.parseInt(height, this.bounds.height);
+            this.bounds.width  = this.int(width, this.bounds.width);
+            this.bounds.height = this.int(height, this.bounds.height);
             return this;
         }
         this._updateCanvasSize(width, height, trigger, target);
@@ -1423,6 +1426,7 @@ class Utils {
     }
     /** ======== END ======== */
 
+    /** ======== PROMISES ======== */
     async wait (...args) {
         if (args.length === 0)
             return [];
@@ -1453,7 +1457,9 @@ class Utils {
 
         return promises;
     }
+    /** ======== END ======== */
 
+    /** ======== URL ======== */
     static dataURLToBlob (dataURL) {
         const arr = dataURL.split(',');
         const mime = arr[0].match(/:(.*?);/)[1];
@@ -1467,7 +1473,6 @@ class Utils {
 
         return new Blob([u8arr], {type: mime});
     }
-
     static scriptToUrl (script) {
         try {
             new URL(script);
@@ -1500,6 +1505,7 @@ class Utils {
         const blob = new Blob([script], {type: 'application/javascript'});
         return URL.createObjectURL(blob);
     }
+    /** ======== END ======== */
 
 }
 

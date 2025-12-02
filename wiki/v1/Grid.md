@@ -94,22 +94,56 @@ const worldPos = game.grid.cellToWorld(cellPos.x, cellPos.y);
 console.log(worldPos); // {x: 160, y: 96} (assuming 32x32 grid)
 ```
 
-## `setEnabled(enabled): Grid`
+### `enable()`: Grid
 
-Enables or disables grid rendering.
+Enables grid rendering.
 
-| Name    | Type    | Default |
-|---------|---------|---------|
-| enabled | boolean | -       |
-
-**Usage Example:**
+**Usage Examples:**
 
 ```javascript
-// Hide the grid
-game.grid.setEnabled(false);
+// Enable grid
+game.grid.enable();
 
-// Show the grid
-game.grid.setEnabled(true);
+// Show grid on debug mode
+if (debugMode) {
+    game.grid.enable();
+}
+```
+
+### `disable()`: Grid
+
+Disables grid rendering.
+
+**Usage Examples:**
+
+```javascript
+// Disable grid
+game.grid.disable();
+
+// Hide grid in production
+game.grid.disable();
+```
+
+---
+
+### `toggle()`: Grid
+
+Toggles grid visibility on/off.
+
+**Usage Examples:**
+
+```javascript
+// Toggle grid with key press
+game.on('keydown', (e) => {
+    if (e.key === 'g') {
+        game.grid.toggle();
+    }
+});
+
+// Toggle button
+button.on('click', () => {
+    game.grid.toggle();
+});
 ```
 
 ## `setSize(width, height): Grid`

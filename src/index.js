@@ -3,6 +3,7 @@ import Utils            from './Utils.js';
 import Debugger         from './Debugger.js';
 import Pixalo           from './Pixalo.js';
 import Workers          from './Workers.js';
+import Assets           from './Assets.js';
 import AudioManager     from './AudioManager.js';
 import Background       from './Background.js';
 import Bezier           from './Bezier.js';
@@ -21,6 +22,7 @@ export {
     Pixalo as default,
     Utils,
     Workers,
+    Assets,
     AudioManager,
     Background,
     Bezier,
@@ -43,6 +45,7 @@ if (typeof window !== 'undefined') {
         Pixalo,
         Utils,
         Workers,
+        Assets,
         AudioManager,
         Background,
         Bezier,
