@@ -7,7 +7,7 @@
  *    - Salar Izadi
  *    - https://github.com/salarizadi
  */
-import Pixalo from '../../../src/index.js';
+import Pixalo from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
 
 globalThis.px = new Pixalo({
     fps: 60,
@@ -98,10 +98,6 @@ px.on('ready', async () => {
             x: 350,
             duration: 3000
         });
-// scene1.timeout(() => {
-//     console.log('halt')
-//     scene1.stop();
-// }, 2000);
         scene1.find('rect-red').on('click', e => console.log('Click on rect-red'));
         scene1.timer(() => {
             console.log('Hello Scene1')

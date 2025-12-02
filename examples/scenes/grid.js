@@ -37,7 +37,7 @@ globalThis.sceneGrid = px.scene('sceneGrid', {
     }
 });
 sceneGrid.start();
-sceneGrid.grid.setEnabled(true);
+sceneGrid.grid.enable();
 
 sceneGrid.append('triangle', {
     shape    : 'triangle',

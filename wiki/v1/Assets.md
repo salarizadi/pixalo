@@ -57,7 +57,7 @@ if (playerAsset) {
 }
 ```
 
-### `delete(id)`: Pixalo
+### `delete(id)`: Assets
 
 Removes an asset from memory.
 
@@ -71,7 +71,7 @@ Removes an asset from memory.
 game.assets.delete('old-texture');
 ```
 
-### `clear()`: Pixalo
+### `clear()`: Assets
 
 Removes all loaded assets from memory.
 
