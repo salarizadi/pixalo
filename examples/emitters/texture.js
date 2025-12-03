@@ -19,7 +19,7 @@ game.start();
 await game.assets.load('image', 'character',
     'https://raw.githubusercontent.com/pixalo/pixalo/main/examples/assets/character.png');
 
-const emitter = game.createEmitter('tex', {
+const emitter = game.emitters.create('tex', {
     position: { x: game.baseWidth * .5, y: game.baseHeight * .5 },
     shape: 'invisible',
 

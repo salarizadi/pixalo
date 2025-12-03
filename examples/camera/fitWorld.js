@@ -18,7 +18,7 @@ game.start();
 /**
  * Zoom-to-fit entire world on R key
  */
-game.on('keydown', k => k === 'r' && game.camera.focusOnRect({
+game.on('keydown', ({key}) => key === 'r' && game.camera.focusOnRect({
     x: 0, y: 0,
     width: game.baseWidth * 2,
     height: game.baseHeight * 2

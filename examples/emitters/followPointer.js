@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-const flame = game.createEmitter('flame', {
+const flame = game.emitters.create('flame', {
     position: {x: innerWidth / 2, y: innerHeight / 2},
     shape: 'invisible',
     emission: {type: 'point', rate: 35, lifetime: 800},

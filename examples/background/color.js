@@ -23,8 +23,8 @@ game.background.add('#268884', {
 
 game.background.add('#F4A81B', {
     id    : 'orange',
-    width : 20,
-    height: 20
+    width : game.baseWidth,
+    height: game.baseHeight
 });
 
 let visible = false;

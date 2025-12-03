@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-const star = game.createEmitter('diamondSpinner', {
+const star = game.emitters.create('diamondSpinner', {
     position: { x: game.baseWidth * .5, y: game.baseHeight * .5 },
     shape: 'diamond', size: 20, color: '#00ff88', opacity: .6,
     emission: { type: 'point', rate: 60, lifetime: 2000 },

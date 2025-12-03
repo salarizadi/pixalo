@@ -13,7 +13,7 @@ Workers.register('#canvas', 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/ex
     /**
      * For when you use a CDN
      */
-    // fetch: true,
+    fetch: true,
 
     onmessage: (message) =>
         console.log('From Worker', message),
