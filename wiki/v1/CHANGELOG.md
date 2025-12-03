@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## [1.3.0] - 2025-12-02
+## [1.3.0] - 2025-12-04
 
 ### 🚀 Performance & Stability
 Pixalo has been significantly optimized with improved frame rate stability and enhanced reliability across all features.
@@ -84,6 +84,8 @@ Several methods have been moved to their respective classes for better organizat
 - Added **Scenes** statistics panel showing active scenes and their states
 
 #### `Entity` Class
+Optimized and faster `Entity` rendering.
+
 **State Checks**
 - `isChild()` - Check if entity has a parent
 - `isInteractive()` - Check if entity receives events
@@ -115,8 +117,9 @@ game.emitters.create('explosion', {});
 
 ### 🐛 Bug Fixes
 - Fixed frame rate inconsistencies in high-load scenarios
+- Fixed memory leaks
 - Improved entity sorting performance for better rendering order
-- Fixed memory leaks in event listener management
+- Fixed an issue where `BackgroundImage` would not render in different `Entity` shapes.
 
 ### 📚 Documentation
 - Complete rewrite of Scene management documentation
@@ -125,6 +128,7 @@ game.emitters.create('explosion', {});
 - Updated API reference with detailed usage examples
 
 ### 🔑 Key Changes
+- **Rendering optimization**
 - **Mouse & Touch Events**: Complete overhaul of mouse and touch event handling system
     - Proper event ordering respecting entity z-index and scene hierarchy
     - Added `stopPropagation()` support to prevent event bubbling

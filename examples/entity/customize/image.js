@@ -10,9 +10,8 @@
 import Pixalo from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
 
 const game = new Pixalo('#canvas', {
-    fps: 60,
-    width : window.innerWidth,
-    height: window.innerHeight
+    width : innerWidth,
+    height: innerHeight
 });
 
 await game.assets.load('image', 'banner', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/banner.png');
