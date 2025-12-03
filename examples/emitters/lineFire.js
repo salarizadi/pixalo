@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-const lineEm = game.createEmitter('lineFire', {
+const lineEm = game.emitters.create('lineFire', {
     position: { x: innerWidth * 0.5, y: innerHeight * 0.5 },
     shape: 'invisible',
 

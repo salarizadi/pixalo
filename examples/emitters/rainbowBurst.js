@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-const circle = game.createEmitter('circ', {
+const circle = game.emitters.create('circ', {
     position: {x: game.baseWidth * .5, y: game.baseHeight * .5},
     shape: 'circle', size: 12, color: '#00ffe1', opacity: .4,
     emission: {type: 'circle', radius: 60, edge: true, rate: 0, burst: 40, lifetime: 1800},
