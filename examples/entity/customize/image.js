@@ -15,7 +15,7 @@ const game = new Pixalo('#canvas', {
     height: window.innerHeight
 });
 
-await game.loadAsset('image', 'banner', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/banner.png');
+await game.assets.load('image', 'banner', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/banner.png');
 
 game.start();
 
@@ -27,13 +27,13 @@ game.append('photo', {
 
     /** Setting an image in several different ways */
 
-    // backgroundImage: pixalo.getAsset('banner'),
+    // backgroundImage: pixalo.assets.get('banner'),
     // backgroundImage: 'banner',
     // backgroundImageFit: 'cover',
     // backgroundImagePosition: 'center',
     // backgroundImageRepeat: false,
     // image: {
-    //     src: pixalo.getAsset('banner'),
+    //     src: pixalo.assets.get('banner'),
     //     fit: 'cover',
     //     position: 'center',
     //     repeat: false

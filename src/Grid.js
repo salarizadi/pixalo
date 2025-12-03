@@ -7,8 +7,8 @@
 class Grid {
 
     constructor (engine, config = {}) {
-        this.engine = engine;
-        this.enabled = config.enabled !== false;
+        this.engine  = engine;
+        this.enabled = Boolean(engine.config.grid);
 
         // Grid dimensions
         this.width = config.width || 32;
@@ -43,7 +43,7 @@ class Grid {
         if (!this.enabled) return;
 
         const camera = this.engine.camera;
-        const zoom = camera.zoom;
+        const zoom   = camera.zoom;
 
         // Check if grid should be visible at current zoom level
         if (zoom < this.minZoomToShow || zoom > this.maxZoomToShow) {
@@ -52,16 +52,29 @@ class Grid {
 
         ctx.save();
 
-        // Calculate visible area in world coordinates
-        const viewportWidth = this.engine.baseWidth / zoom;
-        const viewportHeight = this.engine.baseHeight / zoom;
+        let startX, startY, endX, endY;
 
-        const startX = camera.x;
-        const startY = camera.y;
-        const endX = startX + viewportWidth;
-        const endY = startY + viewportHeight;
+        // Handle scene bounds
+        if (this.engine.isScene && this.engine.bounds) {
+            const sceneBounds = this.engine.bounds;
 
-        // Apply bounds if set
+            // Use scene bounds directly
+            startX = sceneBounds.x;
+            startY = sceneBounds.y;
+            endX = startX + sceneBounds.width;
+            endY = startY + sceneBounds.height;
+        } else {
+            // Original camera-based calculation
+            const viewportWidth = this.engine.baseWidth / zoom;
+            const viewportHeight = this.engine.baseHeight / zoom;
+
+            startX = camera.x;
+            startY = camera.y;
+            endX = startX + viewportWidth;
+            endY = startY + viewportHeight;
+        }
+
+        // Apply additional bounds if set (this.bounds is different from scene bounds)
         let boundsStartX = this.bounds ? Math.max(startX, this.bounds.x) : startX;
         let boundsStartY = this.bounds ? Math.max(startY, this.bounds.y) : startY;
         let boundsEndX = this.bounds ? Math.min(endX, this.bounds.x + this.bounds.width) : endX;
@@ -82,12 +95,13 @@ class Grid {
         }
 
         // Set line styles with zoom-based alpha adjustment
-        const alphaMultiplier = Math.min(zoom / 2, 1);
+        const alphaMultiplier = this.engine.isScene ? 1 : Math.min(zoom / 2, 1);
+        const lineWidthDivider = this.engine.isScene ? 1 : zoom;
 
         // Draw vertical lines
         ctx.beginPath();
         ctx.strokeStyle = this.engine.adjustAlpha(this.color, alphaMultiplier);
-        ctx.lineWidth = this.lineWidth / zoom;
+        ctx.lineWidth = this.lineWidth / lineWidthDivider;
 
         for (let x = firstVerticalLine; x <= boundsEndX; x += this.width) {
             if (x < boundsStartX) continue;
@@ -96,8 +110,8 @@ class Grid {
             const isMajorLine = this.majorGridEvery > 0 && gridIndex % this.majorGridEvery === 0;
 
             if (!isMajorLine) {
-                ctx.moveTo(x, Math.max(boundsStartY, this.bounds?.y || boundsStartY));
-                ctx.lineTo(x, Math.min(boundsEndY, this.bounds ? this.bounds.y + this.bounds.height : boundsEndY));
+                ctx.moveTo(x, boundsStartY);
+                ctx.lineTo(x, boundsEndY);
             }
         }
         ctx.stroke();
@@ -111,8 +125,8 @@ class Grid {
             const isMajorLine = this.majorGridEvery > 0 && gridIndex % this.majorGridEvery === 0;
 
             if (!isMajorLine) {
-                ctx.moveTo(Math.max(boundsStartX, this.bounds?.x || boundsStartX), y);
-                ctx.lineTo(Math.min(boundsEndX, this.bounds ? this.bounds.x + this.bounds.width : boundsEndX), y);
+                ctx.moveTo(boundsStartX, y);
+                ctx.lineTo(boundsEndX, y);
             }
         }
         ctx.stroke();
@@ -121,7 +135,7 @@ class Grid {
         if (this.majorGridEvery > 0) {
             ctx.beginPath();
             ctx.strokeStyle = this.engine.adjustAlpha(this.majorColor, alphaMultiplier);
-            ctx.lineWidth = this.majorLineWidth / zoom;
+            ctx.lineWidth = this.majorLineWidth / lineWidthDivider;
 
             // Major vertical lines
             for (let x = firstVerticalLine; x <= boundsEndX; x += this.width) {
@@ -129,8 +143,8 @@ class Grid {
 
                 const gridIndex = Math.round((x - this.originX) / this.width);
                 if (gridIndex % this.majorGridEvery === 0) {
-                    ctx.moveTo(x, Math.max(boundsStartY, this.bounds?.y || boundsStartY));
-                    ctx.lineTo(x, Math.min(boundsEndY, this.bounds ? this.bounds.y + this.bounds.height : boundsEndY));
+                    ctx.moveTo(x, boundsStartY);
+                    ctx.lineTo(x, boundsEndY);
                 }
             }
 
@@ -140,8 +154,8 @@ class Grid {
 
                 const gridIndex = Math.round((y - this.originY) / this.height);
                 if (gridIndex % this.majorGridEvery === 0) {
-                    ctx.moveTo(Math.max(boundsStartX, this.bounds?.x || boundsStartX), y);
-                    ctx.lineTo(Math.min(boundsEndX, this.bounds ? this.bounds.x + this.bounds.width : boundsEndX), y);
+                    ctx.moveTo(boundsStartX, y);
+                    ctx.lineTo(boundsEndX, y);
                 }
             }
             ctx.stroke();
@@ -171,10 +185,9 @@ class Grid {
     /** ======== END ======== */
 
     /** ======== CONFIGURATIONS ======== */
-    setEnabled (enabled) {
-        this.enabled = enabled;
-        return this;
-    }
+    enable () {this.enabled = true}
+    disable () {this.enabled = false}
+    toggle () {this.enabled = !this.enabled}
     setSize (width, height = width) {
         this.width = width;
         this.height = height;

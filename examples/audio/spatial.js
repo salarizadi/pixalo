@@ -14,7 +14,7 @@ const game = new Pixalo('#canvas', {
     height: window.innerHeight
 });
 
-await game.loadAsset('audio', 'music', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/audio/An-Epic-Story.mp3', {
+await game.assets.load('audio', 'music', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/audio/An-Epic-Story.mp3', {
     volume: 1,
     loop: true
 });

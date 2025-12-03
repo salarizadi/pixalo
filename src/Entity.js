@@ -19,10 +19,10 @@ class Entity {
         this.absoluteX = this.x;
         this.absoluteY = this.y;
 
-        this.width  = config.width || 32;
+        this.width  = config.width  || 32;
         this.height = config.height || 32;
 
-        this.parent = null;
+        this.parent   = null;
         this.children = new Map();
         this.constrainToParent = config.constrainToParent ?? true;
 
@@ -111,7 +111,7 @@ class Entity {
         this.defaultZIndex = this.zIndex;
 
         this.sprite = config.sprite ? {
-            asset: this.engine.getAsset(config.sprite.asset),
+            asset: this.engine.assets.get(config.sprite.asset),
             width: config.sprite?.width || null,
             height: config.sprite?.height || null,
             x: config.sprite?.x || 0,
@@ -130,85 +130,103 @@ class Entity {
     }
 
     /** ======== EVENTS ======== */
-    on (eventName, callback) {
+    on (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.on(event, callback);
-            })
+            eventName.forEach(e => this.on(e, callback, config));
             return this;
         }
         if (typeof eventName === 'object') {
-            for (const key in eventName) {
-                this.on(key, eventName[key]);
-            }
+            for (const k in eventName) this.on(k, eventName[k], config);
             return this;
         }
-        if (!this.eventListeners.has(eventName)) {
+
+        if (!this.eventListeners.has(eventName))
             this.eventListeners.set(eventName, new Set());
-        }
-        this.eventListeners.get(eventName).add(callback);
+
+        this.eventListeners.get(eventName).add({cb: callback, cfg: config});
         return this;
     }
-    one (eventName, callback) {
+    one (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.one(event, callback);
-            });
+            eventName.forEach(e => this.one(e, callback, config));
             return this;
         }
-
         if (typeof eventName === 'object') {
-            for (const key in eventName)
-                this.one(key, eventName[key]);
+            for (const k in eventName) this.one(k, eventName[k], config);
             return this;
         }
 
-        const onceWrapper = (data) => {
-            callback.call(this, data);
+        const onceWrapper = (...args) => {
+            callback.apply(this, args);
             this.off(eventName, onceWrapper);
         };
 
-        this.on(eventName, onceWrapper);
+        this.on(eventName, onceWrapper, config);
+        return this;
+    }
+    trigger (eventName, ...args) {
+        args.push(eventName);
+
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.trigger(e, ...args));
+            return this;
+        }
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        // We use Array.from to avoid errors if the listener is deleted during execution.
+        Array.from(set).forEach(({cb}) => cb.apply(this, args));
         return this;
     }
     off (eventName, callback) {
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => this.off(event, callback));
+            eventName.forEach(e => this.off(e, callback));
             return this;
         }
-        if (this.eventListeners.has(eventName))
-            this.eventListeners.get(eventName).delete(callback);
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        if (callback) {
+            for (const item of set) {
+                if (item.cb === callback) {
+                    set.delete(item);
+                    break;
+                }
+            }
+        } else {
+            set.clear();
+        }
         return this;
     }
-    trigger (eventName, ...args) {
-        if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.trigger(event, args);
-            })
-            return this;
+    clearEvents () {
+        for (const [eventName, set] of this.eventListeners.entries()) {
+            for (const item of [...set])
+                if (item.cfg?.removeable !== false) set.delete(item);
+            if (set.size === 0) this.eventListeners.delete(eventName);
         }
-
-        if (!this.eventListeners.has(eventName)) return this;
-
-        const listeners = this.eventListeners.get(eventName);
-        for (const callback of listeners)
-            callback.apply(this, args);
-        
-        return this;
     }
     /** ======== END ======== */
 
+    /** ======== STATE CHECKS ======== */
+    isChild () {return this.engine.isEntity(this.parent)}
     isHoverable () {return this.events.hoverable}
     isDraggable () {return this.events.draggable}
     isClickable () {return this.events.clickable}
     isInteractive () {return this.events.interactive}
+    /** ======== END ======== */
 
     /** ======== ENTITIES ======== */
     append (childId, config = {}) {
         let child;
 
         if (childId instanceof Entity) {
-            child = childId;
+            child   = childId;
             childId = child.id;
         } else {
             child = new Entity(
@@ -216,9 +234,10 @@ class Entity {
             );
         }
 
+        const rootParent = this.engine.rootParent();
+
         // Handle duplicate IDs
-        if (this.engine.getEntities().has(child.id)) {
-            // child.id = `${child.id}_${Date.now()}`;
+        if (rootParent.mergeEntities(false, true).has(child.id)) {
             this.engine.error(`Entity (${child.id}) exists with this ID`);
             return child;
         }
@@ -229,6 +248,8 @@ class Entity {
         this.engine.debugger.addItem(child.id, child);
 
         child.updatePosition();
+
+        (this.engine.parent || this.engine).clearSortedEntities();
 
         return child;
     }
@@ -308,6 +329,10 @@ class Entity {
         };
         this.children.forEach(walk);
         return map;
+    }
+    sortByZIndex () {
+        if (!this.children.size) return [];
+        return [...this.children.values()].sort((a, b) => a.zIndex - b.zIndex);
     }
     clone (newId = null) {
         // Create base configuration from current entity state
@@ -416,16 +441,57 @@ class Entity {
         const container = this.parent ? this.parent.children : this.engine.entities;
         return [...container.values()].filter(e => e !== this);
     }
-    swap (parent) {
-        if (!parent || !(parent instanceof Entity))
-            throw new TypeError('swap: parent must be an Entity');
+    swap (destination) {
+        if (!destination) throw new TypeError('swap: target is required');
 
-        const oldParent = this.parent;
-        if (oldParent === parent) return this;
+        const oldEngine = this.engine;
+        if (!oldEngine) return this;
 
-        if (oldParent) oldParent.children.delete(this.id);
-        this.parent = parent;
-        parent.children.set(this.id, this);
+        // Normalize destination
+        let destMap, newEngine;
+        if (oldEngine.isEntity(destination)) {
+            destMap   = destination.children;
+            newEngine = destination.engine;
+        } else if (oldEngine.isEntities(destination)) {
+            destMap   = destination;
+            newEngine = destination === oldEngine.entities ? oldEngine
+                : [...destination.values()][0]?.engine ?? oldEngine;
+        } else if (destination?.isPixalo) {
+            destMap   = destination.entities;
+            newEngine = destination;
+        } else throw new TypeError('swap: target must be Entity, Scene, or Map');
+
+        if (destMap.has(this.id))
+            throw new Error(`Entity (${this.id}) already exists in destination`);
+
+        // Remove from old home
+        if (this.parent)
+            this.parent.children.delete(this.id);
+        else
+            oldEngine.entities.delete(this.id);
+
+        // Remove from old physics
+        if (oldEngine.physicsEnabled && this.physics)
+            oldEngine.physics.removeEntity(this);
+
+        // Add to new home
+        destMap.set(this.id, this);
+
+        // Update parent & engine
+        this.engine = newEngine;
+        this.parent = (destMap === newEngine.entities) ? null
+            : (destination instanceof Entity) ? destination
+                : (destination instanceof Map && destination !== newEngine.entities)
+                    ? [...destination.values()][0]?.parent ?? null
+                    : null;
+
+        // Register in new physics if needed
+        if (newEngine.physicsEnabled && this.physics && !this.parent)
+            newEngine.physics.addEntity(this, this.physics);
+
+        // Refresh caches & world position
+        oldEngine.rootParent(e => e.clearSortedEntities());
+        newEngine.rootParent(e => e.clearSortedEntities());
         this.updatePosition();
 
         return this;
@@ -433,6 +499,14 @@ class Entity {
     empty () {
         this.children.forEach(entity => entity._destroy());
         return this;
+    }
+    rootParent (callback) {
+        let current = this;
+        while (current.parent) {
+            callback?.(current);
+            current = current.parent;
+        }
+        return current;
     }
     /** ======== END ======== */
 
@@ -445,14 +519,58 @@ class Entity {
         } else if (this.parent) {
             this.absoluteX = this.parent.absoluteX + this.x;
             this.absoluteY = this.parent.absoluteY + this.y;
+
+            // Constrain to parent bounds if enabled
+            if (this.constrainToParent) {
+                const parentLeft   = this.parent.absoluteX;
+                const parentTop    = this.parent.absoluteY;
+                const parentRight  = parentLeft + this.parent.width - this.width;
+                const parentBottom = parentTop + this.parent.height - this.height;
+
+                this.absoluteX = Math.max(parentLeft, Math.min(parentRight, this.absoluteX));
+                this.absoluteY = Math.max(parentTop, Math.min(parentBottom, this.absoluteY));
+
+                // Update relative position based on constrained absolute position
+                this.x = this.absoluteX - this.parent.absoluteX;
+                this.y = this.absoluteY - this.parent.absoluteY;
+            }
         } else {
             this.absoluteX = this.x;
             this.absoluteY = this.y;
         }
 
-        this.children.forEach(child => {
-            child.updatePosition();
-        });
+        /**
+         * Handle constrain
+         */
+        if (!this.parent && this.engine.isScene && this.engine.bounds) {
+            const {x: bx, y: by, width: bw, height: bh} = this.engine.bounds;
+            this.absoluteX += bx;
+            this.absoluteY += by;
+
+            // Constrain to scene bounds if enabled
+            if (this.engine.constrain) {
+                this.absoluteX = Math.max(bx, Math.min(bx + bw - this.width, this.absoluteX));
+                this.absoluteY = Math.max(by, Math.min(by + bh - this.height, this.absoluteY));
+
+                this.x = this.absoluteX - bx;
+                this.y = this.absoluteY - by;
+            }
+        }
+
+        /**
+         * Handle physics
+         */
+        if (this.physics) {
+            if (this.engine.physicsEnabled)
+                this.engine.physics.setTransform(this, {x: this.x, y: this.y});
+            else if (this.engine.mergeable) {
+                const rootParent = this.engine.rootParent();
+                if (rootParent.physicsEnabled)
+                    rootParent.physics.setTransform(this, {x: this.x, y: this.y});
+            }
+        }
+
+        this.children.forEach(child => child.updatePosition());
     }
     /** ======== END ======== */
 
@@ -470,6 +588,11 @@ class Entity {
             duration: 300,
             easing: 'linear',
             delay: 0,
+            repeat: false,
+            onComplete: null,
+            onUpdate: null,
+            onPause: null,
+            onResume: null,
             ...options
         };
 
@@ -477,47 +600,36 @@ class Entity {
         const startValues = {};
         Object.keys(properties).forEach(p => startValues[p] = this.styles[p]);
 
-        /* ---------- time-handling variables ---------- */
-        let startTime = performance.now() + options.delay; // real-world start moment
-        let pausedAt = 0;   // when we entered pause
-        let totalPause = 0; // accumulated pause time
-
         const ease = (typeof options.easing === 'function')
             ? options.easing
             : (this.engine.Ease[options.easing] ?? this.engine.Ease.linear);
 
-        /* ---------- animation loop ---------- */
-        const animate = (now) => {
-            /* engine paused -> record pause start and wait */
-            if (!this.engine?.running) {
-                if (pausedAt === 0) pausedAt = now;
-                requestAnimationFrame(animate);
-                return;
-            }
-
-            /* just resumed -> add the last pause duration to totalPause */
-            if (pausedAt !== 0) {
-                totalPause += now - pausedAt;
-                pausedAt = 0;
-            }
-
-            const adjustedNow = now - totalPause; // virtual time without pauses
-
+        /* ---------- use animate ---------- */
+        const animation = this.engine.animate(({elapsed}) => {
             /* delay not finished yet */
-            if (adjustedNow < startTime) {
-                requestAnimationFrame(animate);
-                return;
+            if (elapsed < options.delay) {
+                return true; // continue
             }
 
-            const elapsed = adjustedNow - startTime;
-            if (elapsed >= options.duration) {               /* animation finished */
+            const actualElapsed = elapsed - options.delay;
+            const cycleDuration = options.duration;
+
+            /* check if animation should repeat */
+            const shouldRepeat = options.repeat;
+            const currentCycleElapsed = shouldRepeat
+                ? actualElapsed % cycleDuration
+                : actualElapsed;
+
+            /* animation finished (only for non-repeating) */
+            if (!shouldRepeat && actualElapsed >= cycleDuration) {
                 this.style(properties);
                 options.onComplete?.call(this);
-                return;
+                this.unset('transitionAnimation');
+                return false; // stop
             }
 
             /* interpolate and apply current frame */
-            const progress = elapsed / options.duration;
+            const progress = currentCycleElapsed / cycleDuration;
             const eased = ease(progress);
 
             const currentValues = {};
@@ -530,11 +642,31 @@ class Entity {
                     currentValues[prop] = this._interpolateColor(startV, endV, eased);
                 }
             });
-            this.style(currentValues);
-            requestAnimationFrame(animate);
-        };
 
-        requestAnimationFrame(animate);
+            this.style(currentValues);
+            options.onUpdate?.call(this, eased);
+
+            return true; // continue
+        }, {
+            onPause: options.onPause,
+            onResume: options.onResume
+        });
+
+        // Store animation reference for cancellation
+        this.data('transitionAnimation', animation);
+
+        return this;
+    }
+    stopTransition () {
+        const animation = this.data('transitionAnimation');
+        if (!animation) return this;
+
+        // Cancel the animation
+        animation.cancel();
+
+        // Clean up
+        this.unset('transitionAnimation');
+
         return this;
     }
     startAnimation (name) {
@@ -550,10 +682,13 @@ class Entity {
         state.isRunning = true;
         this.animationStates.set(name, state);
 
-        const animate = () => {
-            if (!state.isRunning) return;
+        const frameDuration = animation.options.duration / animation.keyframes.length;
+        let nextFrameTime = frameDuration;
 
-            if (this.engine?.running) {
+        state.animation = this.engine.animate(({elapsed}) => {
+            if (!state.isRunning) return false;
+
+            if (elapsed >= nextFrameTime) {
                 const keyframe = animation.keyframes[state.currentFrame];
                 this.style(keyframe);
 
@@ -564,18 +699,17 @@ class Entity {
                         if (typeof state.repeat === 'number') state.repeat--;
                     } else {
                         state.isRunning = false;
-                        return;
+                        return false;
                     }
                 }
+
+                nextFrameTime = elapsed + frameDuration;
             }
 
-            this.engine.timeout(
-                () => requestAnimationFrame(animate),
-                animation.options.duration / animation.keyframes.length
-            );
-        };
+            return true;
+        });
+        this.animationStates.set(name, state);
 
-        requestAnimationFrame(animate);
         return this;
     }
     stopAnimation (name) {
@@ -586,11 +720,13 @@ class Entity {
             if (state) {
                 state.isRunning = false;
                 state.currentFrame = 0;
+                state.animation?.cancel();
             }
         } else {
             this.animationStates.forEach(state => {
                 state.isRunning = false;
                 state.currentFrame = 0;
+                state.animation?.cancel();
             });
         }
         return this;
@@ -691,7 +827,7 @@ class Entity {
     text (text) {
         if (typeof text === 'undefined')
             return this.styles.text;
-        this.styles.text = text;
+        this.styles.text = String(text);
         return this;
     }
     img (asset, properties = {}) {
@@ -764,7 +900,7 @@ class Entity {
         if (typeof asset === 'string' && asset.includes('.')) {
             imageData = this.#getAssetImage(asset);
         } else {
-            const assetObj = this.engine.getAsset(asset);
+            const assetObj = this.engine.assets.get(asset);
             if (!assetObj) {
                 throw new Error('Asset not found.');
             }
@@ -799,6 +935,16 @@ class Entity {
                 this.trigger('moveStop', {x: this.x, y: this.y});
             }, 5);
         }
+
+        // Cancel physics animation
+        if (this.engine.physicsEnabled) {
+            const physicsMoveAnimation = this.data('physicsMoveAnimation');
+            if (physicsMoveAnimation) {
+                physicsMoveAnimation.cancel();
+                this.unset('physicsMoveAnimation');
+            }
+        }
+
         return this;
     }
     move (options, y = 0, duration = 0) {
@@ -856,40 +1002,19 @@ class Entity {
             initialPositions.set(e, {x: e.x, y: e.y, absoluteX: e.absoluteX, absoluteY: e.absoluteY})
         );
 
-        /* ---------- time-keeping for pause/resume ---------- */
-        let startTime = performance.now();
-        let pausedAt = 0;   // when we entered pause
-        let totalPause = 0;  // accumulated paused time
-
         const easingFunction =
             typeof config.easing === 'function'
                 ? config.easing
                 : this.engine.Ease[config.easing] || this.engine.Ease.linear;
 
-        /* ---------- animation loop ---------- */
-        const animate = (now) => {
-            /* ---- engine paused -> record pause start ---- */
-            if (!this.engine?.running) {
-                if (pausedAt === 0) pausedAt = now;
-                requestAnimationFrame(animate);
-                return;
-            }
-
-            /* ---- just resumed -> update total paused time ---- */
-            if (pausedAt !== 0) {
-                totalPause += now - pausedAt;
-                pausedAt = 0;
-            }
-
-            const adjustedNow = now - totalPause;
-            let elapsed = adjustedNow - startTime;
-
+        /* ---------- use animate ---------- */
+        const animation = this.engine.animate(({elapsed}) => {
             /* ---- animation finished ---- */
             if (elapsed >= config.duration) {
                 this.style({x: config.x, y: config.y});
                 config.onComplete?.call(this);
                 this.unset('moveAnimation');
-                return;
+                return false; // stop animation
             }
 
             /* ---- interpolate and apply ---- */
@@ -911,12 +1036,13 @@ class Entity {
 
             config.onUpdate?.call(this, eased);
 
-            const animationId = requestAnimationFrame(animate);
-            this.data('moveAnimation', animationId);
-        };
+            return true; // continue animation
+        }, {
+            onPause: config.onPause,
+            onResume: config.onResume
+        });
 
-        const animationId = requestAnimationFrame(animate);
-        this.data('moveAnimation', animationId);
+        this.data('moveAnimation', animation);
         return this;
     }
     jump (force, config = {}) {
@@ -993,7 +1119,6 @@ class Entity {
         this.sprite.currentAnimation = animationName;
         this.sprite.currentFrame = 0;
         this.sprite.playing = true;
-        this.sprite.lastFrameUpdate = performance.now();
 
         // trigger events callbacks
         this.trigger('animationStart', animationName);
@@ -1003,17 +1128,15 @@ class Entity {
             this.trigger('animationChange', oldAnimation, animationName);
         }
 
-        const updateFrame = () => {
-            if (!this.sprite.playing) return;
+        const frameInterval = 1000 / animation.frameRate;
+        let nextFrameTime = frameInterval;
 
-            const now = performance.now();
-            const elapsed = now - this.sprite.lastFrameUpdate;
-            const frameInterval = 1000 / animation.frameRate;
+        this.sprite.frameTimer = this.engine.animate(({elapsed}) => {
+            if (!this.sprite.playing) return false;
 
-            if (elapsed >= frameInterval) {
+            if (elapsed >= nextFrameTime) {
                 const oldFrame = this.sprite.currentFrame;
                 this.sprite.currentFrame++;
-                this.sprite.lastFrameUpdate = now;
 
                 // trigger framechange
                 if (oldFrame !== this.sprite.currentFrame) {
@@ -1031,22 +1154,22 @@ class Entity {
                         this.stop();
                         this.trigger('animationEnd', animationName);
                         animation.onEnd?.call(this, animationName);
-                        return;
+                        return false;
                     }
                 }
+
+                nextFrameTime = elapsed + frameInterval;
             }
 
-            this.sprite.frameTimer = requestAnimationFrame(updateFrame);
-        };
-
-        updateFrame();
+            return true;
+        });
         return this;
     }
     pause () {
         if (!this.sprite || !this.sprite.playing) return this;
         this.sprite.playing = false;
         if (this.sprite.frameTimer) {
-            cancelAnimationFrame(this.sprite.frameTimer);
+            this.sprite.frameTimer.cancel();
             this.sprite.frameTimer = null;
         }
         this.trigger('animationPause', this.sprite.currentAnimation);
@@ -1073,7 +1196,7 @@ class Entity {
         this.sprite.playing = false;
         this.sprite.currentFrame = 0;
         if (this.sprite.frameTimer) {
-            cancelAnimationFrame(this.sprite.frameTimer);
+            this.sprite.frameTimer.cancel();
             this.sprite.frameTimer = null;
         }
         if (currentAnimation) {
@@ -1085,7 +1208,7 @@ class Entity {
         return this.sprite?.playing || false;
     }
     setSpriteAsset (asset) {
-        asset = this.engine.getAsset(asset);
+        asset = this.engine.assets.get(asset);
         if (asset.type !== 'spritesheet')
             return this;
         this.sprite.asset = asset;
@@ -1135,9 +1258,8 @@ class Entity {
         if (!this.engine.camera.inView(this))
             return;
 
-        if (this.styles.position === 'fixed') {
+        if (this.styles.position === 'fixed')
             this.updatePosition();
-        }
 
         ctx.save();
 
@@ -1213,13 +1335,8 @@ class Entity {
         ctx.restore();
 
         // Render children
-        if (this.children.size > 0) {
-            this.children.forEach(child => {
-                if (child.styles.visible) {
-                    child.render(ctx);
-                }
-            });
-        }
+        if (this.children.size > 0)
+            this.sortByZIndex().forEach(child => child.styles.visible ? child.render(ctx) : 0);
     }
     renderShape (ctx) {
         switch (this.styles.shape) {
@@ -1808,46 +1925,7 @@ class Entity {
     }
     /** ======== END ======== */
 
-    kill () {
-        Promise.resolve().then(() => this._destroy());
-    }
-    _destroy () {
-        if (!this.engine) return false;
-
-        this.halt();
-
-        if (this.engine.physics && this.physics)
-            this.engine.physics.removeEntity(this);
-
-        if (this.engine.draggedEntity === this) this.engine.draggedEntity = null;
-        if (this.engine.hoveredEntity === this) this.engine.hoveredEntity = null;
-
-        if (this.engine.collisionEnabled && this.collision?.enabled)
-            this.engine.collision.remove(this);
-
-        if (this.parent)
-            this.parent.children.delete(this.id);
-        else
-            this.engine.entities.delete(this.id);
-
-        this.children.forEach(child => child.kill());
-
-        this.trigger('kill');
-        this.engine.trigger('kill', this.id);
-
-        // Clear all references
-        this.engine.debugger.removeItem(this.id);
-        this.parent = null;
-        this.engine = null;
-        this.children.clear();
-        this.eventListeners.clear();
-        this.animationStates.clear();
-        this.dataset.clear();
-        this.class.clear();
-
-        return true;
-    }
-
+    /** ======== BACKGROUND ======== */
     #normalizeBackground (config = {}) {
         const background = {};
 
@@ -1888,7 +1966,7 @@ class Entity {
 
         if (typeof id === 'string' && id.includes('.')) {
             const [assetId, tileName] = id.split('.');
-            const asset = this.engine.getAsset?.(assetId);
+            const asset = this.engine.assets.get?.(assetId);
 
             if (asset && asset.type === 'tiles' && asset.config.tiles[tileName]) {
                 return {
@@ -1899,7 +1977,7 @@ class Entity {
             }
         }
 
-        const asset = this.engine.getAsset?.(id);
+        const asset = this.engine.assets.get?.(id);
         if (asset) {
             return {
                 asset: asset.asset,
@@ -1910,6 +1988,51 @@ class Entity {
 
         return null;
     }
+    /** ======== END ======== */
+
+    /** ======== DESTROY ======== */
+    kill () {
+        Promise.resolve().then(() => this._destroy());
+    }
+    _destroy () {
+        if (!this.engine) return false;
+
+        this.halt();
+
+        if (this.engine.physics && this.physics)
+            this.engine.physics.removeEntity(this);
+
+        if (this.engine.draggedEntity === this) this.engine.draggedEntity = null;
+        if (this.engine.hoveredEntity === this) this.engine.hoveredEntity = null;
+
+        if (this.engine.collisionEnabled && this.collision?.enabled)
+            this.engine.collision.remove(this);
+
+        if (this.parent)
+            this.parent.children.delete(this.id);
+        else
+            this.engine.entities.delete(this.id);
+
+        this.children.forEach(child => child.kill());
+
+        this.engine.rootParent(engine => engine.clearSortedEntities());
+
+        this.trigger('kill');
+        this.engine.trigger('kill', this.id);
+
+        // Clear all references
+        this.engine.debugger.removeItem(this.id);
+        this.parent = null;
+        this.engine = null;
+        this.children.clear();
+        this.eventListeners.clear();
+        this.animationStates.clear();
+        this.dataset.clear();
+        this.class.clear();
+
+        return true;
+    }
+    /** ======== END ======== */
 
 }
 

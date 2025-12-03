@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('image', 'character',
+await game.assets.load('image', 'character',
     'https://raw.githubusercontent.com/pixalo/pixalo/main/examples/assets/character.png');
 
 const emitter = game.createEmitter('tex', {

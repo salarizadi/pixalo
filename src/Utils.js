@@ -37,6 +37,14 @@ class Utils {
 
     /** ======== RESIZE ======== */
     resize (width, height, trigger = true, target = null) {
+        width  = width  || 0;
+        height = height || 0;
+
+        if (this.isScene) {
+            this.bounds.width  = this.int(width, this.bounds.width);
+            this.bounds.height = this.int(height, this.bounds.height);
+            return this;
+        }
         this._updateCanvasSize(width, height, trigger, target);
         return this;
     }
@@ -116,53 +124,106 @@ class Utils {
     /** ======== END ======== */
 
     /** ======== ENTITIES ======== */
-    getSortedEntitiesForInteraction () {
-        const entities = [];
-        let globalIndex = 0;
+    getSortedEntitiesForInteraction (scene = null) {
+        // Return sorted entities if already calculated
+        if (this.sortedEntities.entities.length && this.sortedEntities.scene?.id === scene?.id)
+            return this.sortedEntities.entities;
 
-        const addEntityWithChildren = (entity, level = 0, parentZIndex = 0) => {
-            // Calculating the effective zIndex considering all parents
-            let effectiveZIndex = parentZIndex + (entity.zIndex || 0);
+        const entities  = []; // Initialize an array to hold entities for sorting
+        let globalOrder = 0;  // Counter to maintain the order of addition
 
-            // Add your entity
+        // Recursive function to add entities to the list
+        const add = (entity, level, parent, sceneZ) => {
+            // Skip the entity if it's not visible or physics is enabled
+            if (!entity.styles.visible || entity.engine.physicsEnabled) return;
+
+            const entityZ   = entity.zIndex || 0;   // Get the zIndex of the entity (default to 0)
+            const newParent = [...parent, entityZ]; // Create a new parent array with current entity's zIndex
+
+            // Push the entity information into the entities array
             entities.push({
-                entity,
-                level,                  // Depth in the tree
-                effectiveZIndex,        // Effective zIndex
-                isChild: !!entity.parent,
-                addOrder: globalIndex++ // Global sequence number
+                entity, level, sceneZ,
+                parent: newParent, addOrder: globalOrder++ // Increment globalOrder for unique sorting
             });
 
-            // In-depth survey of children
-            for (const child of entity.children.values()) {
-                // Each child inherits its parent's zIndex.
-                addEntityWithChildren(child, level + 1, effectiveZIndex);
-            }
+            // Recursively add children entities
+            for (const child of entity.children.values())
+                add(child, level + 1, newParent, sceneZ);
         };
 
-        // Starting from the main entities
-        for (const entity of this.entities.values()) {
-            addEntityWithChildren(entity);
+        // Merge scenes
+        let merged = (scene || this).mergeEntities(true, true);
+
+        // Iterate through merged entities to process each one
+        for (const e of merged.values()) {
+            if (e.engine.freezed) continue;
+
+            // Determine the sceneZ based on whether the entity is a scene
+            const sceneZ = e.engine?.isScene ? (e.engine.zIndex || 0) : 0;
+            add(e, 0, [], sceneZ); // Start adding the entity with level 0 and empty parent
         }
 
-        // Sorting by different criteria
-        return entities
-            .sort((a, b) => {
-                // 1. Priority by layer (effective zIndex)
-                if (b.effectiveZIndex !== a.effectiveZIndex) {
-                    return b.effectiveZIndex - a.effectiveZIndex;
-                }
+        // Sort entities based on parent hierarchy, zIndex, and addition order
+        this.sortedEntities.scene    = scene;
+        this.sortedEntities.entities = entities.sort((a, b) => {
+            const aParent = a.parent; // Parent array for entity a
+            const bParent = b.parent; // Parent array for entity b
+            const minLen = Math.min(aParent.length, bParent.length); // Determine the minimum length of parents
 
-                // 2. Priority with greater depth (deeper children)
-                if (b.level !== a.level) {
-                    return b.level - a.level;
-                }
+            for (let i = 0; i < minLen; i++) {
+                // Calculate difference for the current level in the parent hierarchy
+                const diff = bParent[i] - aParent[i];
+                if (diff !== 0) return diff; // Return the difference if not equal
+            }
 
-                // 3. Finally, the order of addition
-                return a.addOrder - b.addOrder;
-            })
-            .map(item => item.entity);
+            // If parent lengths differ, prioritize longer parent chains
+            if (aParent.length !== bParent.length)
+                return bParent.length - aParent.length;
+
+            // Finally, sort by the order of addition if all else is equal
+            return b.addOrder - a.addOrder;
+        }).map(item => item.entity); // Extract only the entities from the sorted items
+
+        return this.sortedEntities.entities;
     }
+    sortEntitiesAfterInteraction (target, recursive = false) {
+        const entities = this.mergeEntities(true, true);
+        let rootParent = target.rootParent(); // Get the root parent of the targeted entity
+
+        // Check if the target is a child entity
+        if (target.isChild()) {
+            const children = target.siblings(); // Get all siblings of the target entity
+
+            // Adjust zIndex of siblings that have a higher zIndex than the target
+            children.forEach(child => {
+                if (child.zIndex > target.zIndex)
+                    child.zIndex--; // Decrement the zIndex to make space for the target
+            });
+
+            // Find the maximum zIndex among siblings
+            let maxChildZIndex = 0;
+            children.forEach(child => maxChildZIndex = Math.max(maxChildZIndex, child.zIndex || 0));
+            // Set the target's zIndex to one higher than the maximum sibling zIndex
+            target.zIndex = maxChildZIndex + 1;
+
+            // If not in recursive mode, sort the root parent after updating the target
+            if (!recursive)
+                target.rootParent(parent => this.sortEntitiesAfterInteraction(parent, true));
+        }
+
+        // Adjust zIndex for all entities that have a higher zIndex than the root parent
+        entities.forEach(entity => entity.zIndex > rootParent.zIndex ? entity.zIndex-- : 0);
+
+        // Determine the maximum zIndex among entities excluding the root parent
+        let maxZIndex = 0;
+        entities.forEach(entity => entity !== rootParent ? maxZIndex = Math.max(maxZIndex, entity.zIndex || 0) : 0);
+        // Update the root parent's zIndex to be one higher than the maximum found
+        rootParent.zIndex = maxZIndex + 1;
+
+        // Clear the sorted entities cache for fresh sorting in future interactions
+        this.clearSortedEntities();
+    }
+    clearSortedEntities () {this.sortedEntities = {scene: null, entities: []}}
     isPointInEntity (x, y, entity) {
         if (!entity.styles.visible) return false;
 
@@ -177,7 +238,7 @@ class Utils {
         if (entity.collision?.points?.length > 0)
             return Collision.isPointInCollisionPoints(localX, localY, entity.collision.points);
 
-        const scaledWidth = entity.width * entity.styles.scale * entity.styles.scaleX;
+        const scaledWidth  = entity.width * entity.styles.scale * entity.styles.scaleX;
         const scaledHeight = entity.height * entity.styles.scale * entity.styles.scaleY;
 
         switch (entity.styles.shape) {
@@ -190,6 +251,50 @@ class Utils {
                 return Math.abs(localX) <= scaledWidth / 2 && Math.abs(localY) <= scaledHeight / 2;
         }
     }
+    handleDragEntity (target, event) {
+        let {entity, dragStartX, dragStartY} = target;
+        if (this.isEntity(target)) {
+            entity     = target;
+            dragStartX = target.dragStartX;
+            dragStartY = target.dragStartY;
+        }
+        if (!entity.isDraggable()) return;
+
+        let newX = event.worldX - dragStartX;
+        let newY = event.worldY - dragStartY;
+
+        if (entity.parent) {
+            newX -= entity.parent.absoluteX;
+            newY -= entity.parent.absoluteY;
+        } else if (entity.engine.isScene && entity.engine.bounds) {
+            const {x: bx, y: by} = entity.engine.bounds;
+            newX -= bx;
+            newY -= by;
+        }
+
+        entity.style({x: newX, y: newY}).trigger('dragMove', event);
+    }
+    /** ======== END ======== */
+
+    /** ======== SCENES ======== */
+    isPointInScene (x, y, interactive = []) {
+        if (!this.scenes.size) return false;
+
+        const sortedScenes = this.sortedScenes();
+        const scenes = [];
+
+        for (const scene of sortedScenes) {
+            const bounds = scene.bounds;
+            if (interactive.length && !interactive.includes(scene.interactive)) continue;
+
+            const inside = x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+            if (!inside) continue;
+
+            scenes.push(scene);
+        }
+
+        return scenes.length ? scenes : false;
+    }
     /** ======== END ======== */
 
     /** ======== TOUCHES ======== */
@@ -197,72 +302,11 @@ class Utils {
         if (!this.running) return;
 
         for (const touch of e.changedTouches) {
-            const identifier = touch.identifier;
+            const identifier  = touch.identifier;
             const worldCoords = this.camera.screenToWorld(touch.clientX, touch.clientY);
-
-            const eventData = {
-                x: worldCoords.x,
-                y: worldCoords.y,
-                worldX: worldCoords.x,
-                worldY: worldCoords.y,
-                screenX: touch.clientX,
-                screenY: touch.clientY,
-                timestamp: Date.now(),
-                touches: this._handleTouches(e),
-                identifier
-            };
-
-            this.trigger('touchstart', eventData);
-
-            if (this.physicsEnabled) continue;
-
-            const sortedEntities = this.getSortedEntitiesForInteraction();
-            const targetEntity = sortedEntities.find(entity =>
-                (entity.isDraggable() || entity.isClickable() || entity.isInteractive()) &&
-                this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
-            );
-
-            if (targetEntity) {
-                if (targetEntity.isInteractive()) {
-                    targetEntity.trigger('touchstart', eventData);
-                    this.touchStartEntities.set(identifier, targetEntity);
-                }
-
-                this.entities.forEach(entity => {
-                    if (entity.zIndex > targetEntity.zIndex) {
-                        entity.zIndex--;
-                    }
-                });
-
-                let maxZIndex = 0;
-                this.entities.forEach(entity => {
-                    maxZIndex = Math.max(maxZIndex, entity.zIndex || 0);
-                });
-                targetEntity.zIndex = maxZIndex + 1;
-
-                if (targetEntity.isDraggable()) {
-                    this.draggedEntities.set(identifier, {
-                        entity: targetEntity,
-                        touchStartX: worldCoords.x,
-                        touchStartY: worldCoords.y,
-                        dragStartX: worldCoords.x - targetEntity.absoluteX,
-                        dragStartY: worldCoords.y - targetEntity.absoluteY
-                    });
-                    targetEntity.trigger('drag', eventData);
-                }
-            }
-        }
-    }
-    _handleTouchMove (e) {
-        e?.preventDefault?.();
-        if (!this.running) return;
-
-        for (const touch of e.changedTouches) {
-            const identifier = touch.identifier;
-            const draggedData = this.draggedEntities.get(identifier);
-            const worldCoords = this.camera.screenToWorld(touch.clientX, touch.clientY);
-
-            const eventData = {
+            const scenes  = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+            let eventData = {
+                scenes,
                 x: worldCoords.x,
                 y: worldCoords.y,
                 worldX: worldCoords.x,
@@ -272,63 +316,89 @@ class Utils {
                 timestamp: Date.now(),
                 touches: this._handleTouches(e),
                 identifier,
+                originalEvent: e,
+                stopPropagation () {this._stopPropagation = true}
             };
 
-            this.trigger('touchmove', eventData);
+            if (scenes)
+                for (const [index, scene] of scenes.entries()) {
+                    const event = this._handleTouchStartTriggers(identifier, eventData, scene);
 
-            if (this.physicsEnabled) continue;
+                    if (index === scenes.length - 1)
+                        eventData = event;
 
-            const touchStartEntity = this.touchStartEntities.get(identifier);
-            if (touchStartEntity && touchStartEntity.isInteractive()) {
-                touchStartEntity.trigger('touchmove', eventData);
-            } else {
-                const sortedEntities = this.getSortedEntitiesForInteraction();
-                const targetEntity = sortedEntities.find(entity =>
-                    entity.isInteractive() && this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
-                );
-
-                if (targetEntity) {
-                    targetEntity.trigger('touchmove', eventData);
+                    if (event._stopPropagation || scene.interactive === 'catch') {
+                        eventData._stopPropagation = true;
+                        break;
+                    }
                 }
-            }
 
-            // Handle drag logic
-            if (!draggedData) continue;
-
-            const entity = draggedData.entity;
-            let newX = worldCoords.x - draggedData.dragStartX;
-            let newY = worldCoords.y - draggedData.dragStartY;
-
-            if (entity.parent && entity.constrainToParent) {
-                const parent = entity.parent;
-                const minX = 0;
-                const minY = 0;
-                const maxX = parent.width - entity.width;
-                const maxY = parent.height - entity.height;
-                newX = Math.max(minX, Math.min(maxX, newX - parent.absoluteX));
-                newY = Math.max(minY, Math.min(maxY, newY - parent.absoluteY));
-            } else if (entity.parent) {
-                newX -= entity.parent.absoluteX;
-                newY -= entity.parent.absoluteY;
-            }
-
-            entity.style({
-                x: newX,
-                y: newY
-            });
-
-            entity.trigger('dragMove', eventData);
+            // Handle main scene
+            if (!eventData._stopPropagation)
+                this._handleTouchStartTriggers(identifier, eventData, null);
         }
     }
-    _handleTouchEnd (e) {
+    _handleTouchStartTriggers (identifier, eventData, scene = null) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene) {
+                scene.trigger('touchstart', event);
+            } else if (!event._stopPropagation)
+                this.trigger('touchstart', event);
+            return event;
+        }
+
+        const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+        const targetEntity   = sortedEntities.find(entity =>
+            (entity.isDraggable() || entity.isClickable() || entity.isInteractive()) &&
+            this.isPointInEntity(event.x, event.y, entity)
+        );
+        if (!targetEntity) {
+            if (!event._stopPropagation)
+                this.trigger('touchstart', event);
+            return event;
+        }
+
+        this.sortEntitiesAfterInteraction(targetEntity);
+
+        if (targetEntity.isInteractive()) {
+            targetEntity.trigger('touchstart', event);
+            this.touchStartEntities.set(identifier, targetEntity);
+        }
+
+        if (targetEntity.isDraggable()) {
+            this.draggedEntities.set(identifier, {
+                entity: targetEntity,
+                touchStartX: event.x,
+                touchStartY: event.y,
+                dragStartX: event.x - targetEntity.absoluteX,
+                dragStartY: event.y - targetEntity.absoluteY
+            });
+            targetEntity.trigger('drag', event);
+        }
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene) {
+            scene.trigger('touchstart', event);
+        } else if (!event._stopPropagation)
+            this.trigger('touchstart', event);
+
+        return event;
+    }
+    _handleTouchMove (e) {
+        e?.preventDefault?.();
         if (!this.running) return;
 
         for (const touch of e.changedTouches) {
-            const identifier = touch.identifier;
+            const identifier  = touch.identifier;
             const draggedData = this.draggedEntities.get(identifier);
             const worldCoords = this.camera.screenToWorld(touch.clientX, touch.clientY);
-
-            const eventData = {
+            const scenes  = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+            let eventData = {
+                scenes,
                 x: worldCoords.x,
                 y: worldCoords.y,
                 worldX: worldCoords.x,
@@ -337,37 +407,139 @@ class Utils {
                 screenY: touch.clientY,
                 timestamp: Date.now(),
                 touches: this._handleTouches(e),
-                identifier
+                identifier,
+                originalEvent: e,
+                stopPropagation () {this._stopPropagation = true}
             };
 
-            this.trigger('touchend', eventData);
+            if (scenes)
+                for (const [index, scene] of scenes.entries()) {
+                    const event = this._handleTouchMoveTriggers(identifier, eventData, draggedData, scene);
 
-            if (this.physicsEnabled) return;
+                    if (index === scenes.length - 1)
+                        eventData = event;
 
-            const touchStartEntity = this.touchStartEntities.get(identifier);
-            if (touchStartEntity && touchStartEntity.isInteractive()) {
-                touchStartEntity.trigger('touchend', eventData);
-                this.touchStartEntities.delete(identifier);
-            }
+                    if (event._stopPropagation || scene.interactive === 'catch') {
+                        eventData._stopPropagation = true;
+                        break;
+                    }
+                }
 
-            // Handle drag end logic
-            if (draggedData) {
-                const entity = draggedData.entity;
-
-                const deltaX = Math.abs(worldCoords.x - draggedData.touchStartX);
-                const deltaY = Math.abs(worldCoords.y - draggedData.touchStartY);
-                const wasDragged = deltaX > 5 || deltaY > 5;
-
-                if (entity.isDraggable())
-                    entity.trigger('drop', eventData);
-
-                // if (!wasDragged && entity.isClickable()) {
-                //     entity.trigger('click', eventData);
-                // }
-
-                this.draggedEntities.delete(identifier);
-            }
+            // Handle main scene
+            if (!eventData._stopPropagation)
+                this._handleTouchMoveTriggers(identifier, eventData, draggedData, null);
         }
+    }
+    _handleTouchMoveTriggers (identifier, eventData, draggedData, scene) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene) {
+                scene.trigger('touchmove', event);
+            } else if (!event._stopPropagation)
+                this.trigger('touchmove', event);
+            return event;
+        }
+
+        const touchStartEntity = this.touchStartEntities.get(identifier);
+        if (touchStartEntity && touchStartEntity.isInteractive()) {
+            touchStartEntity.trigger('touchmove', event);
+        } else {
+            const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+            const targetEntity   = sortedEntities.find(entity =>
+                entity.isInteractive() && this.isPointInEntity(event.x, event.y, entity)
+            );
+            if (targetEntity)
+                targetEntity.trigger('touchmove', event);
+        }
+
+        // Handle drag
+        if (draggedData)
+            this.handleDragEntity(draggedData, event);
+
+        if (event._stopPropagation) return event;
+
+        if (scene)
+            scene.trigger('touchmove', event);
+        else if (!event._stopPropagation)
+            this.trigger('touchmove', event);
+
+        return event;
+    }
+    _handleTouchEnd (e) {
+        if (!this.running) return;
+
+        for (const touch of e.changedTouches) {
+            const identifier  = touch.identifier;
+            const draggedData = this.draggedEntities.get(identifier);
+            const worldCoords = this.camera.screenToWorld(touch.clientX, touch.clientY);
+            const scenes  = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+            let eventData = {
+                scenes,
+                x: worldCoords.x,
+                y: worldCoords.y,
+                worldX: worldCoords.x,
+                worldY: worldCoords.y,
+                screenX: touch.clientX,
+                screenY: touch.clientY,
+                timestamp: Date.now(),
+                touches: this._handleTouches(e),
+                identifier,
+                originalEvent: e,
+                stopPropagation () {this._stopPropagation = true}
+            };
+
+            if (scenes)
+                for (const [index, scene] of scenes.entries()) {
+                    const event = this._handleTouchEndTriggers(identifier, eventData, draggedData, scene);
+
+                    if (index === scenes.length - 1)
+                        eventData = event;
+
+                    if (event._stopPropagation || scene.interactive === 'catch') {
+                        eventData._stopPropagation = true;
+                        break;
+                    }
+                }
+
+            // Handle main scene
+            if (!eventData._stopPropagation)
+                this._handleTouchEndTriggers(identifier, eventData, draggedData, null);
+        }
+    }
+    _handleTouchEndTriggers (identifier, eventData, draggedData, scene) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene) {
+                scene.trigger('touchend', event);
+            } else if (!event._stopPropagation)
+                this.trigger('touchend', event);
+            return event;
+        }
+
+        const touchStartEntity = this.touchStartEntities.get(identifier);
+        if (touchStartEntity && touchStartEntity.isInteractive()) {
+            touchStartEntity.trigger('touchend', event);
+            this.touchStartEntities.delete(identifier);
+        }
+
+        // Handle drag end logic
+        if (draggedData) {
+            const entity = draggedData.entity;
+            if (entity.isDraggable())
+                entity.trigger('drop', event);
+            this.draggedEntities.delete(identifier);
+        }
+
+        if (event._stopPropagation) return event;
+
+        if (scene)
+            scene.trigger('touchend', event);
+        else if (!event._stopPropagation)
+            this.trigger('touchend', event);
+
+        return event;
     }
     _handleTouchCancel (e) {
         if (!this.running) return;
@@ -376,13 +548,11 @@ class Utils {
             const identifier = touch.identifier;
 
             const touchStartEntity = this.touchStartEntities.get(identifier);
-            if (touchStartEntity) {
+            if (touchStartEntity)
                 this.touchStartEntities.delete(identifier);
-            }
 
-            if (this.draggedEntities.has(identifier)) {
+            if (this.draggedEntities.has(identifier))
                 this.draggedEntities.delete(identifier);
-            }
         }
     }
     _handleTouches (e) {
@@ -403,10 +573,13 @@ class Utils {
 
     /** ======== MOUSE ======== */
     _handleMouseDown (e) {
-        if (!this.running || e.buttons === 2) return;
+        if (!this.running) return;
 
         const worldCoords = this.camera.screenToWorld(e.clientX, e.clientY);
-        const eventData = {
+        const scenes      = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+        let eventData     = {
+            scenes,
+            button: e.buttons,
             x: worldCoords.x,
             y: worldCoords.y,
             worldX: worldCoords.x,
@@ -414,50 +587,80 @@ class Utils {
             screenX: e.clientX,
             screenY: e.clientY,
             which: e.which,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            originalEvent: e,
+            stopPropagation () {this._stopPropagation = true}
         };
 
-        this.trigger('mousedown', eventData);
+        if (scenes)
+            for (const [index, scene] of scenes.entries()) {
+                const event = this._handleMouseDownTriggers(eventData, scene);
 
-        if (this.physicsEnabled) return;
+                if (index === scenes.length - 1)
+                    eventData = event;
 
-        const sortedEntities = this.getSortedEntitiesForInteraction();
-        const targetEntity = sortedEntities.find(entity =>
-            (entity.isDraggable() || entity.isInteractive()) && this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
-        );
+                if (event._stopPropagation || scene.interactive === 'catch') {
+                    eventData._stopPropagation = true;
+                    break;
+                }
+            }
+
+        // Handle main scene
+        if (!eventData._stopPropagation)
+            this._handleMouseDownTriggers(eventData, null);
+    }
+    _handleMouseDownTriggers (eventData, scene = null) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene) {
+                scene.trigger('mousedown', event);
+            } else if (!event._stopPropagation)
+                this.trigger('mousedown', event);
+            return event;
+        }
+
+        const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+        const targetEntity   = sortedEntities.find(entity => {
+            // if (scene && (entity.engine?.id !== scene.id && scene.interactive === 'catch')) return false;
+            return (entity.isDraggable() || entity.isInteractive()) && this.isPointInEntity(event.x, event.y, entity)
+        });
 
         if (targetEntity) {
+            this.sortEntitiesAfterInteraction(targetEntity);
+
             if (targetEntity.isInteractive()) {
-                targetEntity.trigger('mousedown', eventData);
+                targetEntity.trigger('mousedown', event);
                 this.mouseDownEntity = targetEntity;
             }
 
             if (targetEntity.isDraggable()) {
                 this.draggedEntity = targetEntity;
+                this.draggedEntity.dragStartX = event.x - targetEntity.absoluteX;
+                this.draggedEntity.dragStartY = event.y - targetEntity.absoluteY;
 
-                this.entities.forEach(entity => {
-                    if (entity.zIndex > targetEntity.zIndex) {
-                        entity.zIndex--;
-                    }
-                });
-
-                let maxZIndex = 0;
-                this.entities.forEach(entity => {
-                    maxZIndex = Math.max(maxZIndex, entity.zIndex || 0);
-                });
-                targetEntity.zIndex = maxZIndex + 1;
-
-                this.draggedEntity.dragStartX = worldCoords.x - targetEntity.absoluteX;
-                this.draggedEntity.dragStartY = worldCoords.y - targetEntity.absoluteY;
-                targetEntity.trigger('drag', eventData);
+                targetEntity.trigger('drag', event);
             }
         }
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene) {
+            scene.trigger('mousedown', event);
+        } else if (!event._stopPropagation)
+            this.trigger('mousedown', event);
+
+        return event;
     }
     _handleMouseUp (e) {
-        if (!this.running || e.buttons === 2) return;
+        if (!this.running) return;
 
         const worldCoords = this.camera.screenToWorld(e.clientX, e.clientY);
-        const eventData = {
+        const scenes      = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+        let eventData     = {
+            scenes,
+            button: e.buttons,
             x: worldCoords.x,
             y: worldCoords.y,
             worldX: worldCoords.x,
@@ -465,29 +668,68 @@ class Utils {
             screenX: e.clientX,
             screenY: e.clientY,
             which: e.which,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            originalEvent: e,
+            stopPropagation () {this._stopPropagation = true}
         };
 
-        this.trigger('mouseup', eventData);
+        if (scenes)
+            for (const [index, scene] of scenes.entries()) {
+                const event = this._handleMouseUpTriggers(eventData, scene);
 
-        if (this.physicsEnabled) return;
+                if (index === scenes.length - 1)
+                    eventData = event;
 
-        if (this.mouseDownEntity && this.mouseDownEntity.isInteractive()) {
-            this.mouseDownEntity.trigger('mouseup', eventData);
+                if (event._stopPropagation || scene.interactive === 'catch') {
+                    eventData._stopPropagation = true;
+                    break;
+                }
+            }
+
+        // Handle main scene
+        if (!eventData._stopPropagation)
+            this._handleMouseUpTriggers(eventData, null);
+    }
+    _handleMouseUpTriggers (eventData, scene) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene)
+                scene.trigger('mouseup', event);
+            else if (!event._stopPropagation)
+                this.trigger('mouseup', event);
+            return event;
+        }
+
+        if (this.isEntity(this.mouseDownEntity) && this.mouseDownEntity.isInteractive()) {
+            this.mouseDownEntity.trigger('mouseup', event);
             this.mouseDownEntity = null;
         }
 
         // Handle drag end
-        if (this.draggedEntity) {
-            this.draggedEntity.trigger('drop', eventData);
+        if (this.isEntity(this.draggedEntity)) {
+            this.draggedEntity.trigger('drop', event);
             this.draggedEntity = null;
         }
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene)
+            scene.trigger('mouseup', event);
+        else if (!event._stopPropagation)
+            this.trigger('mouseup', event);
+
+        return event;
     }
     _handleMouseMove (e) {
-        if (!this.running || e.buttons === 2) return;
+        if (!this.running) return;
 
         const worldCoords = this.camera.screenToWorld(e.clientX, e.clientY);
-        const eventData = {
+        const scenes      = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+        let eventData     = {
+            scenes,
+            button: e.buttons,
             x: worldCoords.x,
             y: worldCoords.y,
             worldX: worldCoords.x,
@@ -495,76 +737,83 @@ class Utils {
             screenX: e.clientX,
             screenY: e.clientY,
             which: e.which,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            originalEvent: e,
+            stopPropagation () {this._stopPropagation = true}
         };
 
-        this.trigger('mousemove', eventData);
+        if (scenes)
+            for (const [index, scene] of scenes.entries()) {
+                const event = this._handleMouseMoveTriggers(eventData, scene);
 
-        if (this.physicsEnabled) return;
+                if (index === scenes.length - 1)
+                    eventData = event;
+
+                if (event._stopPropagation || scene.interactive === 'catch') {
+                    eventData._stopPropagation = true;
+                    break;
+                }
+            }
+
+        // Handle main scene
+        if (!eventData._stopPropagation)
+            this._handleMouseMoveTriggers(eventData, null);
+    }
+    _handleMouseMoveTriggers (eventData, scene) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene)
+                scene.trigger('mousemove', event);
+            else if (!event._stopPropagation)
+                this.trigger('mousemove', event);
+            return event;
+        }
 
         // Handle drag
-        if (this.draggedEntity && this.draggedEntity.isDraggable()) {
-            let newX = worldCoords.x - this.draggedEntity.dragStartX;
-            let newY = worldCoords.y - this.draggedEntity.dragStartY;
-
-            if (this.draggedEntity.parent && this.draggedEntity.constrainToParent) {
-                const parent = this.draggedEntity.parent;
-                const minX = 0;
-                const minY = 0;
-                const maxX = parent.width - this.draggedEntity.width;
-                const maxY = parent.height - this.draggedEntity.height;
-                newX = Math.max(minX, Math.min(maxX, newX - parent.absoluteX));
-                newY = Math.max(minY, Math.min(maxY, newY - parent.absoluteY));
-            } else if (this.draggedEntity.parent) {
-                newX -= this.draggedEntity.parent.absoluteX;
-                newY -= this.draggedEntity.parent.absoluteY;
-            }
-
-            this.draggedEntity.style({
-                x: newX,
-                y: newY
-            });
-
-            this.draggedEntity.trigger('dragMove', eventData);
+        if (this.draggedEntity) {
+            this.handleDragEntity(this.draggedEntity, event);
+            return event;
         }
 
-        if (this.mouseDownEntity && this.mouseDownEntity.isInteractive()) {
-            this.mouseDownEntity.trigger('mousemove', eventData);
-        } else {
-            const sortedEntities = this.getSortedEntitiesForInteraction();
-            const targetEntity = sortedEntities.find(entity =>
-                this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
-            );
-
-            if (targetEntity && targetEntity.isInteractive()) {
-                targetEntity.trigger('mousemove', eventData);
-            }
-        }
-
-        // Handle hover
-        const sortedEntities = this.getSortedEntitiesForInteraction();
-        const hoverableEntity = sortedEntities.find(entity =>
-            this.isPointInEntity(worldCoords.x, worldCoords.y, entity) && entity.isHoverable()
+        const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+        const targetEntity   = sortedEntities.find(entity =>
+            this.isPointInEntity(event.x, event.y, entity)
         );
 
-        if (hoverableEntity !== this.hoveredEntity) {
-            if (this.hoveredEntity)
-                this.hoveredEntity.trigger('hoverOut', eventData);
-
-            if (hoverableEntity) {
-                this.hoveredEntity = hoverableEntity;
-                hoverableEntity.trigger('hover', eventData);
-            } else {
-                this.hoveredEntity = null;
-            }
+        if (this.isEntity(this.hoveredEntity) && this.hoveredEntity !== targetEntity) {
+            this.hoveredEntity.trigger('hoverOut', event);
+            this.hoveredEntity = null;
         }
+
+        if (this.isEntity(this.mouseDownEntity) && this.mouseDownEntity.isInteractive())
+            this.mouseDownEntity.trigger('mousemove', event);
+        else if (targetEntity && targetEntity.isInteractive())
+            targetEntity.trigger('mousemove', event);
+
+        if (targetEntity && targetEntity.isHoverable() && this.hoveredEntity?.id !== targetEntity.id) {
+            this.hoveredEntity = targetEntity;
+            targetEntity.trigger('hover', event);
+        }
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene)
+            scene.trigger('mousemove', event);
+        else if (!event._stopPropagation)
+            this.trigger('mousemove', event);
+
+        return event;
     }
     _handleWheel (e) {
         if (!this.running) return;
         e?.preventDefault?.();
 
         const worldCoords = this.camera.screenToWorld(e.clientX, e.clientY);
-        const eventData = {
+        const scenes      = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+        let eventData     = {
+            scenes,
             x: worldCoords.x,
             y: worldCoords.y,
             worldX: worldCoords.x,
@@ -575,21 +824,56 @@ class Utils {
             deltaY: e.deltaY,
             deltaZ: e.deltaZ,
             deltaMode: e.deltaMode,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            originalEvent: e,
+            stopPropagation () {this._stopPropagation = true}
         };
 
-        this.trigger('wheel', eventData);
+        if (scenes)
+            for (const [index, scene] of scenes.entries()) {
+                const event = this._handleWheelTriggers(eventData, scene);
 
-        if (this.physicsEnabled) return;
+                if (index === scenes.length - 1)
+                    eventData = event;
 
-        const sortedEntities = this.getSortedEntitiesForInteraction();
-        const targetEntity = sortedEntities.find(entity =>
-            entity.isInteractive() && this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
+                if (event._stopPropagation || scene.interactive === 'catch') {
+                    eventData._stopPropagation = true;
+                    break;
+                }
+            }
+
+        // Handle main scene
+        if (!eventData._stopPropagation)
+            this._handleWheelTriggers(eventData, null);
+    }
+    _handleWheelTriggers (eventData, scene) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled) {
+            if (scene) {
+                scene.trigger('wheel', event);
+            } else if (!event._stopPropagation)
+                this.trigger('wheel', event);
+            return event;
+        }
+
+        const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+        const targetEntity   = sortedEntities.find(entity =>
+            entity.isInteractive() && this.isPointInEntity(event.x, event.y, entity)
         );
 
-        if (targetEntity) {
-            targetEntity.trigger('wheel', eventData);
-        }
+        if (targetEntity)
+            targetEntity.trigger('wheel', event);
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene)
+            scene.trigger('wheel', event);
+        else if (!event._stopPropagation)
+            this.trigger('wheel', event);
+
+        return event;
     }
     /** ======== END ======== */
 
@@ -608,26 +892,65 @@ class Utils {
         if (!this.running) return;
 
         const worldCoords = this.camera.screenToWorld(e.clientX, e.clientY);
-        const eventData = {
+        const scenes      = this.isPointInScene(worldCoords.x, worldCoords.y, ['catch', 'flow']);
+        let eventData     = {
+            scenes,
             x: worldCoords.x,
             y: worldCoords.y,
             worldX: worldCoords.x,
             worldY: worldCoords.y,
             screenX: e.clientX,
             screenY: e.clientY,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            originalEvent: e,
+            stopPropagation () {this._stopPropagation = true}
         };
-        this.trigger(trigger, eventData);
 
-        if (this.physicsEnabled) return;
+        if (scenes)
+            for (const [index, scene] of scenes.entries()) {
+                const event = this._handleClickTriggers(trigger, eventData, scene);
 
-        const sortedEntities = this.getSortedEntitiesForInteraction();
-        const targetEntity = sortedEntities.find(entity =>
-            (entity.isClickable() || entity.isInteractive()) && this.isPointInEntity(worldCoords.x, worldCoords.y, entity)
+                if (index === scenes.length - 1)
+                    eventData = event;
+
+                if (event._stopPropagation || scene.interactive === 'catch') {
+                    eventData._stopPropagation = true;
+                    break;
+                }
+            }
+
+        // Handle main scene
+        if (!eventData._stopPropagation)
+            this._handleClickTriggers(trigger, eventData, null);
+    }
+    _handleClickTriggers (trigger, eventData, scene = null) {
+        const event = {...eventData};
+
+        if (this.physicsEnabled && (scene ? scene.physicsEnabled : true)) {
+            if (scene)
+                scene.trigger(trigger, event);
+            else if (!event._stopPropagation)
+                this.trigger(trigger, event);
+            return event;
+        }
+
+        const sortedEntities = this.getSortedEntitiesForInteraction(scene && scene.interactive === 'catch' ? scene : null);
+        const targetEntity   = sortedEntities.find(entity =>
+            (entity.isClickable() || entity.isInteractive()) && this.isPointInEntity(event.x, event.y, entity)
         );
 
         if (targetEntity)
-            targetEntity.trigger(trigger, eventData);
+            targetEntity.trigger(trigger, event);
+
+        if (event._stopPropagation)
+            return event;
+
+        if (scene) {
+            scene.trigger(trigger, event);
+        } else if (!event._stopPropagation)
+            this.trigger(trigger, event);
+
+        return event;
     }
     /** ======== END ======== */
 
@@ -863,6 +1186,205 @@ class Utils {
     }
     /** ======== END ======== */
 
+    /** ======== ANIMATIONS ======== */
+    animate (callback, options = {}) {
+        const config = {
+            onPause: null,      // callback when paused
+            onResume: null,     // callback when resumed
+            onCancel: null,     // callback when cancelled
+            ...options
+        };
+
+        let animationId = null;
+        let pausedAt = 0;
+        let totalPause = 0;
+        let startTime = performance.now();
+        let cancelled = false;
+
+        const animate = (now) => {
+            // Check if cancelled
+            if (cancelled) {
+                config.onCancel?.();
+                return;
+            }
+
+            /* ---- engine paused -> record pause start ---- */
+            if (!this.running || this.freezed) {
+                if (pausedAt === 0) {
+                    pausedAt = now;
+                    config.onPause?.(now);
+                }
+                animationId = requestAnimationFrame(animate);
+                return;
+            }
+
+            /* ---- just resumed -> update total paused time ---- */
+            if (pausedAt !== 0) {
+                totalPause += now - pausedAt;
+                config.onResume?.(now, totalPause);
+                pausedAt = 0;
+            }
+
+            const adjustedNow = now - totalPause;
+            const elapsed = adjustedNow - startTime;
+
+            // Call user callback with timing info
+            const shouldContinue = callback({
+                now: adjustedNow,
+                elapsed,
+                rawNow: now,
+                totalPause,
+                isPaused: false
+            });
+
+            // Continue animation if callback returns true
+            if (shouldContinue !== false) {
+                animationId = requestAnimationFrame(animate);
+            }
+        };
+
+        animationId = requestAnimationFrame(animate);
+
+        // Return control object
+        return {
+            cancel: () => {
+                cancelled = true;
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                }
+            },
+            getElapsed: () => performance.now() - totalPause - startTime,
+            getTotalPause: () => totalPause,
+            isPaused: () => pausedAt !== 0
+        };
+    }
+    defineAnimation (name, keyframes, options = {}) {
+        this.animations[name] = {
+            keyframes,
+            options: {
+                duration: options.duration || 1000,
+                repeat: options.repeat || 0,
+                easing: options.easing || 'linear'
+            }
+        };
+        return this;
+    }
+    /** ======== END ======== */
+
+    /** ======== WORLD SIZE ======== */
+    worldSize (type = 'bounds') {
+        switch (type) {
+            case 'bounds':
+                if (this.camera && this.camera.bounds) {
+                    return {
+                        width : this.camera.bounds.width,
+                        height: this.camera.bounds.height
+                    };
+                }
+                return {
+                    width : this.baseWidth,
+                    height: this.baseHeight
+                };
+            case 'viewport':
+                const zoom = this.camera ? this.camera.zoom : 1;
+                return {
+                    width : this.baseWidth / zoom,
+                    height: this.baseHeight / zoom
+                };
+            case 'base':
+                return {
+                    width : this.baseWidth,
+                    height: this.baseHeight
+                };
+            case 'canvas':
+                return {
+                    width : this.canvas.width,
+                    height: this.canvas.height
+                };
+            default:
+                return this.worldSize('bounds');
+        }
+    }
+    /** ======== END ======== */
+
+    /** ======== SCREENSHOT ======== */
+    shot (options = {}) {
+        const {
+            format = 'png',
+            quality = 1.0,
+            backgroundColor = this.config.background,
+            download = false,
+            filename = `pixalo-screenshot-${Date.now()}`
+        } = options;
+
+        // Validate parameters
+        if (!['png', 'jpeg', 'webp'].includes(format.toLowerCase()))
+            return this.error('Invalid format. Supported formats are: png, jpeg, webp');
+
+        if (quality < 0 || quality > 1)
+            return this.error('Quality must be between 0 and 1');
+
+        if (this.config.worker) {
+            return new Promise(resolve => {
+                this.workerSend({
+                    action: 'take_screenshot',
+                    ...options
+                }, 'screenshot_taken', event => resolve({
+                    ...event.data.details,
+                    revoke: () => URL.revokeObjectURL(blobURL)
+                }));
+            });
+        }
+
+        // Create a temporary canvas to handle the screenshot
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Set the dimensions to match the original canvas
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+
+        // Fill background if specified
+        if (backgroundColor) {
+            tempCtx.fillStyle = backgroundColor;
+            tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        }
+
+        // Draw the current canvas content
+        tempCtx.drawImage(this.canvas, 0, 0);
+
+        // Convert to data URL
+        const mimeType = `image/${format.toLowerCase()}`;
+        const dataURL = tempCanvas.toDataURL(mimeType, quality);
+
+        // Convert to Blob
+        const blob = Pixalo.dataURLToBlob(dataURL);
+
+        // Create Blob URL
+        const blobURL = URL.createObjectURL(blob);
+
+        // Handle download if requested
+        if (download) {
+            const link = document.createElement('a');
+            link.download = `${filename}.${format.toLowerCase()}`;
+            link.href = dataURL;
+            link.click();
+        }
+
+        // Cleanup
+        tempCanvas.remove();
+
+        return {
+            dataURL,
+            blob,
+            blobURL,
+            width: tempCanvas.width,
+            height: tempCanvas.height,
+            revoke: () => URL.revokeObjectURL(blobURL)
+        };
+    }
+    /** ======== END ======== */
+
     /** ======== MATHS ======== */
     getDistance (x1, y1, x2, y2) {
         return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
@@ -897,8 +1419,14 @@ class Utils {
             y: centerY + (dx * sin + dy * cos)
         };
     }
+    int (value, defValue) {
+        if (value == null) return defValue;
+        const parsed = Number(value);
+        return isNaN(parsed) ? defValue : parsed;
+    }
     /** ======== END ======== */
 
+    /** ======== PROMISES ======== */
     async wait (...args) {
         if (args.length === 0)
             return [];
@@ -929,7 +1457,9 @@ class Utils {
 
         return promises;
     }
+    /** ======== END ======== */
 
+    /** ======== URL ======== */
     static dataURLToBlob (dataURL) {
         const arr = dataURL.split(',');
         const mime = arr[0].match(/:(.*?);/)[1];
@@ -943,7 +1473,6 @@ class Utils {
 
         return new Blob([u8arr], {type: mime});
     }
-
     static scriptToUrl (script) {
         try {
             new URL(script);
@@ -976,6 +1505,7 @@ class Utils {
         const blob = new Blob([script], {type: 'application/javascript'});
         return URL.createObjectURL(blob);
     }
+    /** ======== END ======== */
 
 }
 

@@ -15,13 +15,13 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-game.addBackground('#268884', {
+game.background.add('#268884', {
     id    : 'green',
     width : game.baseWidth,
     height: game.baseHeight
 });
 
-game.addBackground('#F4A81B', {
+game.background.add('#F4A81B', {
     id    : 'orange',
     width : 20,
     height: 20
@@ -29,5 +29,5 @@ game.addBackground('#F4A81B', {
 
 let visible = false;
 game.timer(() => {
-    game.setBackgroundVisible('orange', visible = !visible);
+    game.background.setVisible('orange', visible = !visible);
 }, 1000);

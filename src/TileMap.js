@@ -4,7 +4,7 @@
  * @License: MIT
  */
 import Collision from './Collision.js';
-import Entity from './Entity.js';
+import Entity    from './Entity.js';
 
 class TileMap {
 
@@ -227,7 +227,7 @@ class TileMap {
         const tileInfo = this.getAssetTileInfo(tileReference);
         if (!tileInfo) return;
 
-        const tileAsset = this.engine.getAsset(tileInfo.assetId);
+        const tileAsset = this.engine.assets.get(tileInfo.assetId);
         if (!tileAsset) return;
 
         const tileCoords = tileAsset.config.tiles[tileInfo.tileName];
@@ -334,7 +334,7 @@ class TileMap {
         const [assetId, tileName] = tileReference.split('.');
         if (!assetId || !tileName) return null;
 
-        const asset = this.engine.getAsset(assetId);
+        const asset = this.engine.assets.get(assetId);
         if (!asset) return {assetId, tileName, exists: false};
 
         const tileSize = asset.config?.tileSize || this.getTileBaseSize();
@@ -352,7 +352,7 @@ class TileMap {
         const tileInfo = this.getAssetTileInfo(tileReference);
         if (!tileInfo) return this.getTileBaseSize();
 
-        const asset = this.engine.getAsset(tileInfo.assetId);
+        const asset = this.engine.assets.get(tileInfo.assetId);
         return asset?.config.tileSize || this.getTileBaseSize();
     }
     getTileBaseSize (mapName = this.activeMap) {

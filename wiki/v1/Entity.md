@@ -2,6 +2,19 @@ The Entity class is a core component of the Pixalo game engine that represents v
 
 ## Public Methods
 
+### `isChild()`: Boolean
+
+Returns whether the entity has a parent entity (is nested).
+
+**Usage Examples:**
+
+```javascript
+// Check if entity is a child
+if (entity.isChild()) {
+    console.log('Parent:', entity.parent.id);
+}
+```
+
 ### on(eventName, callback): Entity
 
 Registers one or more event listeners for the specified event(s). Supports multiple registration patterns including arrays and objects.
@@ -40,6 +53,21 @@ entity.one({
 });
 ```
 
+### trigger(eventName, ...args): Entity
+
+Triggers all registered listeners for the specified event(s) with optional arguments.
+
+| Name      | Type               | Default |
+|-----------|--------------------|---------|
+| eventName | string \| string[] | -       |
+| ...args   | any                | -       |
+
+**Usage Example:**
+```javascript
+entity.trigger('customEvent', data1, data2);
+entity.trigger(['event1', 'event2'], sharedData);
+```
+
 ### off(eventName, callback): Entity
 
 Removes specific event listeners from the entity.
@@ -55,19 +83,15 @@ entity.off('click', clickHandler);
 entity.off(['hover', 'click'], multiHandler);
 ```
 
-### trigger(eventName, ...args): Entity
+### `clearEvents()`: Entity
 
-Triggers all registered listeners for the specified event(s) with optional arguments.
+Removes all removeable event listeners while preserving internal system listeners.
 
-| Name      | Type               | Default |
-|-----------|--------------------|---------|
-| eventName | string \| string[] | -       |
-| ...args   | any                | -       |
+**Usage Examples:**
 
-**Usage Example:**
 ```javascript
-entity.trigger('customEvent', data1, data2);
-entity.trigger(['event1', 'event2'], sharedData);
+// Clear all user-defined events
+entity.clearEvents();
 ```
 
 ### append(childId, config): Entity
@@ -191,6 +215,17 @@ const entities = entity.getEntities(false); // Get all children + all children o
 console.log(`Total entities and children: ${entities.size}`);
 ```
 
+### `sortByZIndex()`: Array
+
+Returns child entities sorted by their z-index in ascending order (back to front).
+
+**Usage Examples:**
+
+```javascript
+// Get sorted children
+const sorted = entity.sortByZIndex();
+```
+
 ### clone(newId): Entity
 
 Creates a deep copy of the entity including all its properties, children, event listeners, and animation states.
@@ -249,9 +284,6 @@ const last = entity.prev(true); // loop back to last
 
 Returns an array of all sibling entities (excludes the current entity).
 
-| Name | Type |
-|------|------|
-
 **Usage Examples:**
 
 ```javascript
@@ -259,26 +291,42 @@ const others = entity.siblings();
 others.forEach(s => s.hide());
 ```
 
-### `swap(parent)`: Entity
+### `swap(destination)`: Entity
 
-Moves the `entity` into the specified `parent` entity, removing it from its entity `parent`.
+Moves the entity from its current location to a new parent, scene, or entity collection.
 
-| Name   | Type   |
-|--------|--------|
-| parent | Entity |
+| Name        | Type                    | Default |
+|-------------|-------------------------|---------|
+| destination | Entity\|Pixalo\|Map     | -       |
 
 **Usage Examples:**
 
 ```javascript
-entity.swap(newParent);
+// Move entity to another parent
+entity.swap(otherEntity);
+
+// Move to scene
+const scene = game.scene('level2');
+entity.swap(scene);
+
+// Move to main engine
+entity.swap(game);
+
+// Move to another entity's children
+entity.swap(parentEntity.children);
+
+// Scene transition
+const player = game.find('player');
+const newScene = game.scene('nextLevel');
+player.swap(newScene);
+
+// Transfer between parents
+child.swap(newParent);
 ```
 
 ### `empty()`: Entity
 
 Destroys all child entities of the current entity, leaving it with an empty children collection.
-
-| Name | Type |
-|------|------|
 
 **Usage Examples:**
 
@@ -295,26 +343,96 @@ Updates the absolute position coordinates of this entity and all its children ba
 entity.updatePosition(); // Usually called automatically
 ```
 
-### transition(properties, options): Entity
+### `transition(properties, options)`: Entity
 
-Animates entity properties smoothly over time using easing functions. Supports pause/resume functionality.
+Animates entity properties smoothly over time using easing functions with support for delays, repeating, and callbacks.
 
-| Name       | Type             | Default                                       |
-|------------|------------------|-----------------------------------------------|
-| properties | object \| string | -                                             |
-| options    | object           | { duration: 300, easing: 'linear', delay: 0 } |
+| Name       | Type             | Default |
+|------------|------------------|---------|
+| properties | Object\|String   | -       |
+| options    | Object           | {}      |
 
-**Usage Example:**
+**Options:**
+
+| Property   | Type             | Default  | Description                                |
+|------------|------------------|----------|--------------------------------------------|
+| duration   | Number           | 300      | Animation duration in milliseconds         |
+| easing     | String\|Function | 'linear' | Easing function name or custom function    |
+| delay      | Number           | 0        | Delay before animation starts (ms)         |
+| repeat     | Boolean          | false    | Loop animation indefinitely                |
+| onComplete | Function         | null     | Callback when animation completes          |
+| onUpdate   | Function         | null     | Callback on each frame with eased progress |
+| onPause    | Function         | null     | Callback when animation pauses             |
+| onResume   | Function         | null     | Callback when animation resumes            |
+
+**Usage Examples:**
+
 ```javascript
-entity.transition({ x: 100, opacity: 0.5 }, {
+// Multiple properties
+entity.transition({ 
+    x: 100, 
+    y: 200, 
+    opacity: 0.5 
+}, {
     duration: 1000,
-    easing: 'easeInOut',
-    delay: 500,
-    onComplete: () => console.log('Done')
+    easing: 'easeInOut'
 });
 
-// Single property transition
+// Single property (shorthand)
 entity.transition('rotation', 180, { duration: 500 });
+
+// With callbacks
+entity.transition({ scale: 2 }, {
+    duration: 800,
+    onUpdate: (progress) => console.log(progress),
+    onComplete: () => console.log('Done!')
+});
+
+// Delayed animation
+entity.transition({ x: 300 }, {
+    duration: 1000,
+    delay: 500
+});
+
+// Repeating animation
+entity.transition({ y: 100 }, {
+    duration: 2000,
+    repeat: true,
+    easing: 'easeInOutQuad'
+});
+
+// Color transition
+entity.transition({ 
+    fill: '#ff0000',
+    stroke: '#00ff00'
+}, {
+    duration: 1500
+});
+
+// Custom easing function
+entity.transition({ x: 200 }, {
+    duration: 1000,
+    easing: game.Ease.easeInQuad
+});
+```
+
+### `stopTransition()`: Entity
+
+Stops the current transition animation and cleans up its reference.
+
+**Usage Examples:**
+
+```javascript
+// Start transition
+entity.transition({ x: 500 }, { duration: 2000 });
+
+// Stop it mid-animation
+entity.stopTransition();
+
+// Stop on click
+entity.on('click', () => {
+    entity.stopTransition();
+});
 ```
 
 ### startAnimation(name): Entity
@@ -502,6 +620,25 @@ Removes custom data associated with the entity.
 entity.data('health', 100);
 entity.unset('health'); // Removes 'health'
 const health = entity.data('health'); // Returns undefined
+```
+
+### `getClass()`: String
+
+Returns all class names as a space-separated string.
+
+**Usage Examples:**
+
+```javascript
+// Get classes
+const classes = entity.getClass(); // "button active primary"
+
+// Check current classes
+console.log(entity.getClass()); // "enemy flying boss"
+
+// Use in condition
+if (entity.getClass().includes('active')) {
+    // Handle active state
+}
 ```
 
 ### addClass(...names): Entity
@@ -876,6 +1013,19 @@ Returns whether the entity can receive click events.
 ```javascript
 if (entity.isClickable()) {
     entity.on('click', handleClick);
+}
+```
+
+### `isInteractive()`: Boolean
+
+Returns whether the entity can receive user interaction events (mouse/touch).
+
+**Usage Examples:**
+
+```javascript
+// Check if interactive
+if (entity.isInteractive()) {
+    console.log('Entity can be clicked');
 }
 ```
 

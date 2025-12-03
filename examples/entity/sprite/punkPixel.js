@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('spritesheet', 'punk_pixel', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/punk-pixel.png', {
+await game.assets.load('spritesheet', 'punk_pixel', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/punk-pixel.png', {
     width: 48,
     height: 48,
     columns: 6,

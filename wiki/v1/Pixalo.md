@@ -129,7 +129,7 @@ game.quality(2);
 
 ## Event System
 
-### `on(eventName, callback)`: Pixalo
+### `on(eventName, callback, config)`: Pixalo
 
 Registers an event listener for specified event(s).
 
@@ -137,6 +137,13 @@ Registers an event listener for specified event(s).
 |-----------|-----------------------|---------|
 | eventName | String\|Array\|Object | -       |
 | callback  | Function              | -       |
+| config    | Object                | {}      |
+
+**Config Options:**
+
+| Property   | Type    | Default | Description                                           |
+|------------|---------|---------|-------------------------------------------------------|
+| removeable | Boolean | true    | If `false`, event won't be cleared by `clearEvents()` |
 
 **Usage Examples:**
 
@@ -145,16 +152,19 @@ Registers an event listener for specified event(s).
 game.on('ready', () => console.log('Engine ready!'));
 
 // Multiple events
-game.on(['start', 'stop'], (data) => console.log('Game state changed'));
+game.on(['start', 'stop'], () => console.log('State changed'));
 
 // Object notation
 game.on({
-    'ready': () => console.log('Ready'),
-    'update': (deltaTime) => console.log('Update:', deltaTime)
+    ready : () => console.log('Ready'),
+    update: (deltaTime) => console.log(deltaTime)
 });
+
+// Non-removeable event (system-level)
+game.on('update', handler, { removeable: false });
 ```
 
-### `one(eventName, callback)`: Pixalo
+### `one(eventName, callback, config)`: Pixalo
 
 Registers a one-time event listener that automatically removes itself after first execution.
 
@@ -162,15 +172,25 @@ Registers a one-time event listener that automatically removes itself after firs
 |-----------|-----------------------|---------|
 | eventName | String\|Array\|Object | -       |
 | callback  | Function              | -       |
+| config    | Object                | {}      |
+
+**Config Options:**
+
+| Property   | Type    | Default | Description                                           |
+|------------|---------|---------|-------------------------------------------------------|
+| removeable | Boolean | true    | If `false`, event won't be cleared by `clearEvents()` |
 
 **Usage Examples:**
 
 ```javascript
 // Single one-time event
-game.one('ready', () => console.log('This runs only once'));
+game.one('ready', () => console.log('Runs once'));
 
 // Multiple one-time events
-game.one(['start', 'render'], () => console.log('First occurrence'));
+game.one(['start', 'render'], () => console.log('First time'));
+
+// One-time with config
+game.one('init', handler, { removeable: false });
 ```
 
 ### `trigger(eventName, ...args)`: Pixalo
@@ -212,6 +232,17 @@ game.off('update', handler);
 
 // Remove from multiple events
 game.off(['start', 'stop'], handler);
+```
+
+### `clearEvents()`: Pixalo
+
+Removes all removeable event listeners while preserving internal system listeners.
+
+**Usage Examples:**
+
+```javascript
+// Clear all user-defined events
+game.clearEvents();
 ```
 
 ---
@@ -383,320 +414,6 @@ game.resize(1024, 768);
 
 ---
 
-## [Background](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Background.md) Management
-
-### `addBackground(source, config = {})`: Pixalo
-
-Adds a background layer with specified source and configuration.
-
-| Name   | Type          | Default |
-|--------|---------------|---------|
-| source | String\|Image | -       |
-| config | Object        | {}      |
-
-**Usage Examples:**
-
-```javascript
-// Simple background
-game.addBackground('background.jpg');
-
-// Background with configuration
-game.addBackground('sky', {
-    id: 'sky',
-    parallax: 0.5,
-    repeat: true
-});
-```
-
-### `removeBackground(layerId)`: Pixalo
-
-Removes a background layer by its ID.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.removeBackground('sky');
-```
-
-### `updateBackground(layerId, config)`: Pixalo
-
-Updates configuration of an existing background layer.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-| config  | Object | -       |
-
-**Usage Examples:**
-
-```javascript
-game.updateBackground('sky', {
-    parallax: 0.8,
-    opacity: 0.5
-});
-```
-
-### `clearBackgrounds()`: Pixalo
-
-Removes all background layers.
-
-**Usage Examples:**
-
-```javascript
-game.clearBackgrounds();
-```
-
-### `getBackground(layerId)`: Object | undefined
-
-Retrieves a background layer by its ID.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-
-**Usage Examples:**
-
-```javascript
-const skyLayer = game.getBackground('sky');
-```
-
-### `setBackgroundOrder(layerId, zIndex)`: Pixalo
-
-Sets the rendering order of a background layer.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| layerId | String | -       |
-| zIndex  | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setBackgroundOrder('mountains', 1);
-game.setBackgroundOrder('clouds', 2);
-```
-
-### `setBackgroundVisible(layerId, visible)`: Pixalo
-
-Sets the visibility of a background layer.
-
-| Name    | Type    | Default |
-|---------|---------|---------|
-| layerId | String  | -       |
-| visible | Boolean | -       |
-
-**Usage Examples:**
-
-```javascript
-// Hide background
-game.setBackgroundVisible('rain', false);
-// Show background
-game.setBackgroundVisible('rain', true);
-```
-
----
-
-## [Grid](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Grid.md) System
-
-### `enableGrid()`: Pixalo
-
-Enables the grid system for rendering.
-
-**Usage Examples:**
-
-```javascript
-game.enableGrid();
-```
-
-### `disableGrid()`: Pixalo
-
-Disables the grid system rendering.
-
-**Usage Examples:**
-
-```javascript
-game.disableGrid();
-```
-
-### `toggleGrid()`: Pixalo
-
-Toggles the grid system on/off.
-
-**Usage Examples:**
-
-```javascript
-// Toggle grid visibility
-game.toggleGrid();
-```
-
-### `setGridSize(width, height = width)`: Pixalo
-
-Sets the size of grid cells.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| width  | Number | -       |
-| height | Number | width   |
-
-**Usage Examples:**
-
-```javascript
-// Square grid cells (32x32)
-game.setGridSize(32);
-
-// Rectangular grid cells (32x64)
-game.setGridSize(32, 64);
-```
-
-### `setGridColors(color, majorColor)`: Pixalo
-
-Sets the colors for grid lines and major grid lines.
-
-| Name       | Type   | Default |
-|------------|--------|---------|
-| color      | String | -       |
-| majorColor | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridColors('#cccccc', '#333333');
-```
-
-### `setGridLineWidth(lineWidth, majorLineWidth)`: Pixalo
-
-Sets the line width for grid lines and major grid lines.
-
-| Name           | Type   | Default |
-|----------------|--------|---------|
-| lineWidth      | Number | -       |
-| majorLineWidth | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridLineWidth(1, 2);
-```
-
-### `setMajorGrid(every, color, lineWidth)`: Pixalo
-
-Configures major grid lines that appear every N cells.
-
-| Name      | Type   | Default |
-|-----------|--------|---------|
-| every     | Number | -       |
-| color     | String | -       |
-| lineWidth | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-// Major grid line every 10 cells
-game.setMajorGrid(10, '#ff0000', 3);
-```
-
-### `setGridBounds(bounds)`: Pixalo
-
-Sets the boundaries where grid should be rendered.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| bounds | Object | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridBounds({
-    x: 0, y: 0,
-    width: 1000, height: 800
-});
-```
-
-### `setGridOrigin(x, y)`: Pixalo
-
-Sets the origin point for grid rendering.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-game.setGridOrigin(100, 100);
-```
-
-### `setGridVisibilityRange(minZoom, maxZoom)`: Pixalo
-
-Sets the zoom range where grid is visible.
-
-| Name    | Type   | Default |
-|---------|--------|---------|
-| minZoom | Number | -       |
-| maxZoom | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-// Grid visible between 0.5x and 2x zoom
-game.setGridVisibilityRange(0.5, 2);
-```
-
-### `snapToGrid(x, y)`: Object
-
-Snaps coordinates to the nearest grid intersection.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const snapped = game.snapToGrid(157, 243);
-// Returns nearest grid coordinates
-```
-
-### `getGridCell(x, y)`: Object
-
-Gets the grid cell coordinates for given world coordinates.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| x    | Number | -       |
-| y    | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const cell = game.getGridCell(100, 200);
-// Returns {x: cellX, y: cellY}
-```
-
-### `cellToWorld(cellX, cellY)`: Object
-
-Converts grid cell coordinates to world coordinates.
-
-| Name  | Type   | Default |
-|-------|--------|---------|
-| cellX | Number | -       |
-| cellY | Number | -       |
-
-**Usage Examples:**
-
-```javascript
-const worldPos = game.cellToWorld(5, 10);
-// Returns world coordinates for cell (5, 10)
-```
-
----
-
 ## Game Loop Control
 
 ### `startLoop()`: void
@@ -751,6 +468,27 @@ Renders all game elements to the canvas.
 game.render();
 ```
 
+### `fps(value)`: Number|Pixalo
+
+Gets or sets the target frames per second for the game loop.
+
+| Name  | Type   | Default |
+|-------|--------|---------|
+| value | Number | -       |
+
+**Usage Examples:**
+
+```javascript
+// Get current FPS
+const currentFPS = game.fps(); // 60
+
+// Set FPS to 30
+game.fps(30);
+
+// Set FPS to 120
+game.fps(120);
+```
+
 ### `start()`: Pixalo
 
 Starts the game loop and resumes all timers and audio.
@@ -771,6 +509,38 @@ Stops the game loop and pauses all timers and audio.
 game.stop();
 ```
 
+### `freeze()`: Pixalo
+
+Pauses updates while continuing to render (freezes game logic but keeps visuals).
+
+**Usage Examples:**
+
+```javascript
+// Freeze game
+game.freeze();
+
+// Freeze on pause menu
+pauseButton.on('click', () => {
+    game.freeze();
+});
+```
+
+### `unfreeze()`: Pixalo
+
+Resumes updates after being frozen.
+
+**Usage Examples:**
+
+```javascript
+// Unfreeze game
+game.unfreeze();
+
+// Resume from pause
+resumeButton.on('click', () => {
+    game.unfreeze();
+});
+```
+
 ### `clear()`: void
 
 Clears the canvas and fills it with background color.
@@ -781,15 +551,45 @@ Clears the canvas and fills it with background color.
 game.clear();
 ```
 
-### `reset()`: Pixalo
+### `reset(options)`: Pixalo
 
-Resets the engine state, clearing all entities, events, and timers.
+Resets the engine to its initial state, clearing all runtime data and reinitializing subsystems.
+
+| Name    | Type   | Default |
+|---------|--------|---------|
+| options | Object | {}      |
+
+**Options:**
+
+| Property   | Type    | Default | Description                 |
+|------------|---------|---------|-----------------------------|
+| assets     | Boolean | true    | Clear loaded assets         |
+| audio      | Boolean | true    | Cleanup audio resources     |
+| animations | Boolean | true    | Clear animation definitions |
+| scenes     | Boolean | true    | Clear scene definitions     |
 
 **Usage Examples:**
 
 ```javascript
-// Complete engine reset
+// Complete reset (clears everything)
 game.reset();
+
+// Reset but keep assets loaded
+game.reset({ assets: false });
+
+// Reset but keep audio and animations
+game.reset({ 
+    audio: false, 
+    animations: false 
+});
+
+// Reset and reload level
+game.reset();
+loadLevel(currentLevel);
+
+// Reset scene only
+const scene = game.scene('level1');
+scene.reset();
 ```
 
 ---
@@ -953,92 +753,6 @@ game.error('Failed to load asset:', assetId);
 
 ---
 
-## Asset Management
-
-### `loadAsset(type, id, src, config = {})` (async): Promise<Object>
-
-Loads an asset (image, spritesheet, tiles, or audio) asynchronously.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| type   | String | -       |
-| id     | String | -       |
-| src    | String | -       |
-| config | Object | {}      |
-
-**Usage Examples:**
-
-```javascript
-// Load image
-await game.loadAsset('image', 'player', 'path/player.png');
-
-// Load spritesheet
-await game.loadAsset('spritesheet', 'character', 'path/char.png', {
-    columns: 4, rows: 2, width: 32, height: 32,
-    originOffset: [0, 0],
-    margin: [2, 2]
-});
-
-// Load tileset
-await game.loadAsset('tiles', 'terrain', 'path/tiles.png', {
-    tileSize: 32,
-    tiles: {
-        grass: [0, 0],
-        stone: [1, 0],
-        water: [2, 0]
-    }
-});
-
-// Load audio
-await game.loadAsset('audio', 'bgm', 'music.mp3', {
-    loop: true, volume: 0.8
-});
-```
-
-### `getAsset(id)`: Object | null
-
-Retrieves a loaded asset by its ID.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| id   | String | -       |
-
-**Usage Examples:**
-
-```javascript
-const playerAsset = game.getAsset('player');
-if (playerAsset) {
-    console.log('Asset loaded:', playerAsset.asset);
-}
-```
-
-### `deleteAsset(id)`: Pixalo
-
-Removes an asset from memory.
-
-| Name | Type   | Default |
-|------|--------|---------|
-| id   | String | -       |
-
-**Usage Examples:**
-
-```javascript
-game.deleteAsset('old-texture');
-```
-
-### `clearAssets()`: Pixalo
-
-Removes all loaded assets from memory.
-
-**Usage Examples:**
-
-```javascript
-// Clear all assets (useful for level transitions)
-game.clearAssets();
-```
-
----
-
 ## [Entity](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Entity.md) Management
 
 ### `defineAnimation(name, keyframes, options = {})`: Pixalo
@@ -1125,16 +839,103 @@ const entities = game.getEntities(false); // Get all entities + all children of 
 console.log(`Total entities and children: ${entities.size}`);
 ```
 
-### `getSortedEntitiesByZIndex()`: Array
+### `mergeEntities(onlyParents, forceMerge)`: Map
 
-Returns an array of entities sorted by their z-index (back to front).
+Merges entities from the current engine/scene with entities from all running child scenes into a single Map.
+
+| Name        | Type    | Default | Description                                                                                           |
+|-------------|---------|---------|-------------------------------------------------------------------------------------------------------|
+| onlyParents | Boolean | true    | If `true`, returns only parent entities (excludes children). If `false`, includes all nested children |
+| forceMerge  | Boolean | false   | If `true`, forces merge of all running scenes regardless of their `mergeable` property                |
 
 **Usage Examples:**
 
 ```javascript
-const sortedEntities = game.getSortedEntitiesByZIndex();
-// Entities ordered by rendering depth
+// Merge only parent entities from mergeable scenes
+const mergedEntities = game.mergeEntities();
+// Returns: Map with entities from main + mergeable scenes
+
+// Merge all entities including children
+const allMerged = game.mergeEntities(false);
+// Returns: Map with all entities (parents + children) from mergeable scenes
+
+// Force merge all running scenes (ignore mergeable property)
+const forcedMerge = game.mergeEntities(true, true);
+// Returns: Map with entities from all running scenes
+
+// Example scenario
+const gameScene = game.scene('game', { mergeable: true });
+const uiScene = game.scene('ui', { mergeable: false });
+
+game.append('player', { x: 100, y: 100 });
+gameScene.append('enemy', { x: 200, y: 200 });
+uiScene.append('button', { x: 300, y: 300 });
+
+// Normal merge (only mergeable scenes)
+const normal = game.mergeEntities();
+console.log(normal.has('player')); // true
+console.log(normal.has('enemy'));  // true (gameScene is mergeable)
+console.log(normal.has('button')); // false (uiScene is not mergeable)
+
+// Force merge (all running scenes)
+const forced = game.mergeEntities(true, true);
+console.log(forced.has('player')); // true
+console.log(forced.has('enemy'));  // true
+console.log(forced.has('button')); // true (forced despite mergeable: false)
+
+// Use for collision detection across scenes
+const allEntities = game.mergeEntities(false, true);
+for (const [id, entity] of allEntities) {
+    if (entity.collision) {
+        game.checkCollision(entity, otherEntity);
+    }
+}
+
+// Count total entities
+const merged = game.mergeEntities();
+console.log(`Total entities: ${merged.size}`);
 ```
+
+### `getSortedEntitiesByZIndex(onlyParents, merge, forceMerge)`: Array
+
+Returns an array of entities sorted by their z-index in ascending order (back to front rendering order).
+
+| Name        | Type    | Default | Description                                                                                           |
+|-------------|---------|---------|-------------------------------------------------------------------------------------------------------|
+| onlyParents | Boolean | true    | If `true`, returns only parent entities (excludes children). If `false`, includes all nested children |
+| merge       | Boolean | false   | If `true`, merges entities from all running scenes with main engine entities                          |
+| forceMerge  | Boolean | false   | If `true`, forces merge of all scenes regardless of their `mergeable` property                        |
+
+**Usage Examples:**
+
+```javascript
+// Get only parent entities sorted by z-index
+const sortedEntities = game.getSortedEntitiesByZIndex();
+// Returns: [entity1, entity2, entity3] (sorted by zIndex)
+
+// Get all entities including children
+const allEntities = game.getSortedEntitiesByZIndex(false);
+// Returns: [parent1, child1, child2, parent2, child3] (all sorted)
+
+// Get entities merged from all running scenes
+const mergedEntities = game.getSortedEntitiesByZIndex(true, true);
+// Returns: [mainEntity1, sceneEntity1, mainEntity2, sceneEntity2] (merged & sorted)
+
+// Force merge all scenes (even non-mergeable ones)
+const forcedMerge = game.getSortedEntitiesByZIndex(true, true, true);
+// Returns: [all entities from all scenes regardless of mergeable setting]
+
+// Render entities in correct order
+game.getSortedEntitiesByZIndex(true, true).forEach(entity => {
+    entity.render(game.ctx);
+});
+```
+
+**Notes:**
+- Entities with lower z-index values are rendered first (background)
+- Entities with higher z-index values are rendered last (foreground)
+- When `merge` is `true`, only scenes with `mergeable: true` are included (unless `forceMerge` is `true`)
+- This method is used internally by the rendering pipeline
 
 ### `find(entityId)`: [Entity](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Entity.md) | undefined
 
@@ -1222,6 +1023,34 @@ if (game.isEntity(someObject)) {
 }
 ```
 
+### `isEntities(target)`: Boolean
+
+Validates if the target is a valid Map of entities where all keys are strings and all values are Entity instances.
+
+| Name   | Type | Default | Description                           |
+|--------|------|---------|---------------------------------------|
+| target | Any  | -       | The value to validate as entities Map |
+
+**Usage Examples:**
+
+```javascript
+// Valid entities Map
+const entitiesMap = new Map([
+    ['player', new Entity('player')],
+    ['enemy', new Entity('enemy')]
+]);
+console.log(game.isEntities(entitiesMap)); // true
+
+// Invalid: not a Map
+const array = [new Entity('player')];
+console.log(game.isEntities(array)); // false
+
+// Check scene entities
+const scene = game.scene('level1');
+const sceneEntities = scene.getEntities();
+console.log(game.isEntities(sceneEntities)); // true
+```
+
 ### `kill(entityId)`: Boolean
 
 Removes an entity from the game world.
@@ -1305,34 +1134,6 @@ if (collision) {
     game.kill(collision.entityA.id);
     game.kill(collision.entityB.id);
 }
-```
-
----
-
-## [Particle](https://github.com/pixalo/pixalo/tree/main/wiki/v1/Particle.md) System
-
-### `createEmitter(id, config)`: Object
-
-Creates a particle emitter with specified configuration.
-
-| Name   | Type   | Default |
-|--------|--------|---------|
-| id     | String | -       |
-| config | Object | -       |
-
-**Usage Examples:**
-
-```javascript
-const explosion = game.createEmitter('explosion', {
-    x: 200, y: 150,
-    particleCount: 50,
-    speed: {min: 100, max: 300},
-    life: 2000,
-    color: '#ff6600'
-});
-
-// Start emitting
-explosion.start();
 ```
 
 ---
@@ -1539,6 +1340,146 @@ const fadedHex = game.adjustAlpha('#ff6432', 0.3);
 
 ---
 
+## Animation Utilities
+
+### `animate(callback, options)`: Object
+
+Creates a pause-aware animation loop that automatically handles engine pause/resume states. Returns a control object for managing the animation.
+
+| Name     | Type     | Default | Description                                    |
+|----------|----------|---------|------------------------------------------------|
+| callback | Function | -       | Animation function called each frame           |
+| options  | Object   | {}      | Optional configuration object                  |
+
+**Callback Parameters:**
+
+The callback receives an object with timing information:
+
+| Property   | Type    | Description                                    |
+|------------|---------|------------------------------------------------|
+| now        | Number  | Adjusted timestamp (excluding pause time)      |
+| elapsed    | Number  | Time elapsed since animation start (ms)        |
+| rawNow     | Number  | Raw timestamp from performance.now()           |
+| totalPause | Number  | Total accumulated pause duration (ms)          |
+| isPaused   | Boolean | Current pause state (always false in callback) |
+
+**Options:**
+
+| Property   | Type     | Default | Description                           |
+|------------|----------|---------|---------------------------------------|
+| onPause    | Function | null    | Called when engine pauses             |
+| onResume   | Function | null    | Called when engine resumes            |
+| onCancel   | Function | null    | Called when animation is cancelled    |
+
+**Return Value:**
+
+Returns a control object with the following methods:
+
+| Method          | Returns | Description                              |
+|-----------------|---------|------------------------------------------|
+| cancel()        | void    | Stops and cancels the animation          |
+| getElapsed()    | Number  | Gets elapsed time in milliseconds        |
+| getTotalPause() | Number  | Gets total pause duration                |
+| isPaused()      | Boolean | Checks if animation is currently paused  |
+
+**Usage Examples:**
+
+```javascript
+// Basic animation loop
+const anim = game.animate(({elapsed}) => {
+    console.log('Elapsed:', elapsed);
+    
+    if (elapsed > 5000) {
+        return false; // Stop after 5 seconds
+    }
+    return true; // Continue
+});
+
+// With pause/resume callbacks
+const anim = game.animate(({elapsed}) => {
+    entity.style('x', entity.x + 2);
+    return entity.x < 500;
+}, {
+    onPause : () => console.log('Animation paused'),
+    onResume: (now, totalPause) => console.log('Resumed after', totalPause, 'ms'),
+    onCancel: () => console.log('Animation cancelled')
+});
+
+// Manual control
+anim.cancel(); // Stop the animation
+console.log(anim.getElapsed()); // Get elapsed time
+console.log(anim.isPaused()); // Check pause state
+
+// Animated movement
+const anim = game.animate(({elapsed}) => {
+    const progress = elapsed / 2000; // 2 second duration
+    
+    if (progress >= 1) {
+        entity.style('x', 500);
+        return false; // Complete
+    }
+    
+    entity.style('x', 100 + (400 * progress));
+    return true; // Continue
+});
+```
+
+**Notes:**
+- The callback should return `true` to continue or `false` to stop
+- Animation automatically pauses when `engine.running` is `false`
+- Pause time is excluded from elapsed time calculations
+- Use this instead of `requestAnimationFrame` for pause-aware animations
+
+---
+
+## World Game Utilities
+
+### `worldSize(type)`: Object
+
+Returns width and height dimensions based on the specified type.
+
+| Name | Type   | Default  | Description                                       |
+|------|--------|----------|---------------------------------------------------|
+| type | String | 'bounds' | Size type: 'bounds', 'viewport', 'base', 'canvas' |
+
+**Return Value:**
+
+Returns an object with `width` and `height` properties.
+
+**Size Types:**
+
+| Type     | Description                                           |
+|----------|-------------------------------------------------------|
+| bounds   | Camera bounds size (falls back to base if no bounds)  |
+| viewport | Visible area size adjusted for camera zoom            |
+| base     | Base canvas dimensions (logical size)                 |
+| canvas   | Actual canvas element dimensions (physical size)      |
+
+**Usage Examples:**
+
+```javascript
+// Get camera bounds size
+const bounds = engine.worldSize('bounds');
+// Returns: {width: 2000, height: 1500}
+
+// Get visible viewport size (affected by zoom)
+const viewport = engine.worldSize('viewport');
+// Returns: {width: 800, height: 600} (at zoom 1.0)
+
+// Get base canvas size
+const base = engine.worldSize('base');
+// Returns: {width: 800, height: 600}
+
+// Get actual canvas element size
+const canvas = engine.worldSize('canvas');
+// Returns: {width: 1600, height: 1200} (if scaled)
+
+// Default is 'bounds'
+const size = engine.worldSize();
+```
+
+---
+
 ## Mathematical Utilities
 
 ### `getDistance(x1, y1, x2, y2)`: Number
@@ -1684,6 +1625,33 @@ const rotated = game.rotatePoint(0, 0, 100, 0, 90);
 // Returns: {x: 0, y: 100}
 ```
 
+### `int(value, defValue)`: Number
+
+Safely converts a value to a number (integer or float), returning a default value if conversion fails or value is null/undefined.
+
+| Name     | Type   | Default | Description                                 |
+|----------|--------|---------|---------------------------------------------|
+| value    | Any    | -       | The value to convert to number              |
+| defValue | Number | -       | Default value to return if conversion fails |
+
+**Usage Examples:**
+
+```javascript
+// Valid number conversion
+console.log(game.int('100', 0));     // 100
+console.log(game.int(42.5, 0));      // 42.5
+console.log(game.int('3.14', 0));    // 3.14
+
+// Null/undefined values
+console.log(game.int(null, 50));     // 50
+console.log(game.int(undefined, 0)); // 0
+
+// Invalid conversions
+console.log(game.int('abc', 10));    // 10
+console.log(game.int(NaN, 5));       // 5
+console.log(game.int({}, 20));       // 20
+```
+
 ---
 
 ## Async Utilities
@@ -1701,8 +1669,8 @@ Waits for multiple promises to complete and returns their results.
 ```javascript
 // Wait for multiple asset loads
 const results = await game.wait(
-    game.loadAsset('image', 'player', 'player.png'),
-    game.loadAsset('audio', 'bgm', 'music.mp3'),
+    game.assets.load('image', 'player', 'player.png'),
+    game.assets.load('audio', 'bgm', 'music.mp3'),
     game.delay(1000)
 );
 
@@ -1839,6 +1807,8 @@ game.on('shift+ctrl+z', () => console.log('Redo'));
 - `ready` - Engine initialized
 - `start` - Game loop started
 - `stop` - Game loop stopped
+- `freeze` - Pause update & timers
+- `unfreeze` - Game update & timers started
 - `reset` - Engine reset
 - `resize` - Canvas resized
 - `visibility` - Tab visibility changed
@@ -1932,11 +1902,17 @@ const progress = game.Ease.easeInOutQuad(0.5); // Smooth curve at 50%
 
 ### State Management
 
+- `id`       - Unique identifier for the engine instance (default: `'main'` for main engine, or scene name for scenes)
+- `isPixalo` - Boolean flag to identify Pixalo engine instances (always `true`)
+- `isReady`  - Boolean indicating if the engine initialization is complete and ready to use
+- `isScene`  - Boolean indicating if this instance is a scene (`true`) or main engine (`false`)
+- `freezed`  - Boolean indicating if the engine is frozen (paused updates but continues rendering)
 - `running`  - Boolean indicating if game loop is active
 - `entities` - Map of all game entities
 - `assets`   - Map of loaded assets
 - `timers`   - Map of active timers
 - `dataset`  - Map for custom global data
+- `eventListeners` - Map storing all registered event listeners with their callbacks and configurations
 
 ### Input State
 
@@ -1948,6 +1924,7 @@ const progress = game.Ease.easeInOutQuad(0.5); // Smooth curve at 50%
 ### Subsystems
 
 - `debugger`   - Debug system instance
+- `assets`     - Assets system instance
 - `camera`     - Camera system instance
 - `background` - Background system instance
 - `grid`       - Grid system instance

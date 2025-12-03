@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('spritesheet', 'rpg_character', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/rpg_character.png', {
+await game.assets.load('spritesheet', 'rpg_character', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/rpg_character.png', {
     width: 32,
     height: 32,
     columns: 4,

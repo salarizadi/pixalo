@@ -5,6 +5,7 @@
  */
 import Utils        from './Utils.js';
 import Debugger     from './Debugger.js';
+import Assets       from './Assets.js';
 import Bezier       from './Bezier.js';
 import Ease         from './Ease.js';
 import Camera       from './Camera.js';
@@ -23,27 +24,33 @@ class Pixalo extends Utils {
         super();
 
         selector = selector || {};
-        config.worker = typeof DedicatedWorkerGlobalScope !== 'undefined';
 
-        if (typeof selector === 'string' || (typeof HTMLCanvasElement !== 'undefined' && selector instanceof HTMLCanvasElement)) {
-            this.canvas = Pixalo._handleCanvasSelector(selector, config?.appendTo || null);
-        } else if (typeof selector === 'object') {
+        if (typeof selector === 'object') {
             config = {...selector, ...config};
+        } else if (typeof selector === 'string' || (typeof HTMLCanvasElement !== 'undefined' && selector instanceof HTMLCanvasElement)) {
+            this.canvas = Pixalo._handleCanvasSelector(selector, config?.appendTo || null);
         } else {
             throw new Error('Invalid selector');
         }
 
-        this.eventListeners = new Map();
-        this.assets  = new Map();
-        this.timers  = new Map();
-        this.dataset = new Map();
+        config.worker = typeof DedicatedWorkerGlobalScope !== 'undefined';
 
-        this.#init(config);
+        this.id       = 'main';
+        this.isPixalo = true;
+        this.isReady  = false;
+        this.isScene  = config.isScene || false;
+        this.freezed  = false;
+        this.timers   = new Map();
+        this.dataset  = new Map();
+        this.scenes   = new Map();
+        this.eventListeners  = new Map();
+
+        this.#init(config, false);
     }
 
     async #init (config, run = false) {
         if (config?.worker && !run)
-            return this.#setupWorker(config);
+            return Promise.resolve().then(() => this.#setupWorker(config));
 
         this._createWindow(config?.window);
 
@@ -56,12 +63,18 @@ class Pixalo extends Utils {
             ...(config?.context || {})
         };
 
-        this.ctx = this.canvas.getContext(context.id, context);
+        if (!config.isScene)
+            this.ctx    = this.canvas.getContext(context.id, context);
+        else {
+            this.ctx    = config.ctx;
+            this.canvas = config.canvas;
+        }
+
         this.config = {
             context,
-            worker: config.worker || false,
-            width : config.width  || (this.canvas.width || 0),
-            height: config.height || (this.canvas.height || 0),
+            worker : config.worker  || false,
+            width  : config.width   || (this.canvas.width || 0),
+            height : config.height  || (this.canvas.height || 0),
             fps: config.fps || 60,
             grid: config.grid || false,
             quality: config.quality || this.window.devicePixelRatio,
@@ -70,7 +83,7 @@ class Pixalo extends Utils {
             background: config.background || '#ffffff',
             resizeTarget: config.resizeTarget || false,
             autoResize: config.autoResize ?? true,
-            autoStartStop: config.autoStartStop ?? true,
+            autoStartStop: config.autoStartStop ?? true
         };
         this.baseWidth  = this.config.width;
         this.baseHeight = this.config.height;
@@ -78,22 +91,30 @@ class Pixalo extends Utils {
         this.running  = false;
         this.lastTime = 0;
 
-        this.debugger = new Debugger(this, {
-            active: Boolean(config.debugger),
-            ...config.debugger || {},
-            fps: {
-                target: this.config.fps,
-                actual: this.config.fps,
-                ratio : 100
-            }
-        });
+        if (!config.isScene) {
+            this.debugger = new Debugger(this, {
+                active: Boolean(config.debugger),
+                ...config.debugger || {},
+                fps: {
+                    target: this.config.fps,
+                    actual: this.config.fps,
+                    ratio : 100
+                }
+            });
+        }
 
-        this.entities = new Map();
+        this.entities       = new Map();
+        this.sortedEntities = {
+            scene   : null,
+            entities: []
+        };
 
+        this.assets     = new Assets(this);
         this.background = new Background(this);
-        this.camera     = new Camera(this, config.camera);
 
-        this.gridEnabled = Boolean(config.grid);
+        if (!config.isScene)
+            this.camera = new Camera(this, config.camera);
+
         this.grid = new Grid(this, config.grid || {});
 
         this.physicsEnabled = Boolean(config.physics);
@@ -102,7 +123,9 @@ class Pixalo extends Utils {
         this.collisionEnabled = Boolean(config.collision);
         this.collision = new Collision();
 
-        this.tileMap  = new TileMap(this);
+        if (!config.isScene)
+            this.tileMap = new TileMap(this);
+
         this.emitters = new Emitters(this);
         this.audio    = new AudioManager(this.config.worker);
 
@@ -119,6 +142,7 @@ class Pixalo extends Utils {
         this.touchStartEntities = new Map();
         this._setupEventListeners();
 
+        this.isReady = true;
         this.trigger('ready');
     }
 
@@ -143,6 +167,8 @@ class Pixalo extends Utils {
         };
     }
     _applyCanvasConfig () {
+        if (this.isScene) return;
+
         const config = this.config;
         const canvas = this.canvas;
 
@@ -187,12 +213,21 @@ class Pixalo extends Utils {
         }
     }
 
+    /** ======== WORKER ======== */
     #setupWorker (config) {
         if (typeof DedicatedWorkerGlobalScope === 'undefined')
             throw new Error('Please run Pixalo in the Worker environment.');
 
+        if (this.isScene) {
+            const rootParent = this.rootParent();
+            config.worker = rootParent.config.worker;
+            config.window = rootParent.window;
+            this.#init(config, true);
+            return;
+        }
+
         onmessage = event => this.trigger('worker_msg', event);
-        onerror = event => this.trigger('worker_err', event);
+        onerror   = event => this.trigger('worker_err', event);
 
         this.one('worker_msg', msg => {
             const data = msg.data;
@@ -210,14 +245,39 @@ class Pixalo extends Utils {
                 action: 'ready'
             });
 
-            this.on('worker_msg', this.audio._handleWorker);
+            this.on('worker_msg', this.audio._handleWorker, {removeable: false});
         });
     }
+    async workerSend (data = {}, wait_for = null, callback = null) {
+        if (!this.config.worker) return this;
+        const rootParent = this.rootParent();
 
+        postMessage({
+            wid: rootParent.config.worker,
+            ...data
+        });
+
+        if (wait_for && typeof callback === 'function') {
+            const _callback = event => {
+                if (event.data.action === wait_for) {
+                    callback(event);
+                    rootParent.off('worker_msg', _callback);
+                }
+            };
+            rootParent.on('worker_msg', _callback);
+        }
+
+        return this;
+    }
+    /** ======== END ======== */
+
+    /** ======== SETUP EVENT LISTENERS ======== */
     _setupEventListeners () {
+        if (this.isScene) return;
+
         if (typeof window === 'undefined' || typeof document === 'undefined') {
             if (this.config.worker) {
-                this.on('worker_msg', this._workerEventListeners);
+                this.on('worker_msg', this._workerEventListeners, {removeable: false});
                 return;
             }
             this.warn('Browser environment is required. This feature is only available in browser context.');
@@ -260,6 +320,8 @@ class Pixalo extends Utils {
         this.canvas.addEventListener('keyup', this._handleKeyUp.bind(this));
     }
     _workerEventListeners (event) {
+        if (this.isScene) return;
+
         const data = event.data;
 
         // Handle canvas events
@@ -335,26 +397,7 @@ class Pixalo extends Utils {
                 });
         }
     }
-
-    async workerSend (data = {}, wait_for = null, callback = null) {
-        if (!this.config.worker) return this;
-        postMessage({
-            wid: this.config.worker,
-            ...data
-        });
-
-        if (wait_for && typeof callback === 'function') {
-            const _callback = event => {
-                if (event.data.action === wait_for) {
-                    callback(event);
-                    this.off('worker_msg', _callback);
-                }
-            };
-            this.on('worker_msg', _callback);
-        }
-
-        return this;
-    }
+    /** ======== END ======== */
 
     /** ======== QUALITY ======== */
     quality (value) {
@@ -380,71 +423,86 @@ class Pixalo extends Utils {
     /** ======== END ======== */
 
     /** ======== EVENTS ======== */
-    on (eventName, callback) {
+    on (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.on(event, callback);
-            })
+            eventName.forEach(e => this.on(e, callback, config));
             return this;
         }
         if (typeof eventName === 'object') {
-            for (const key in eventName) {
-                this.on(key, eventName[key]);
-            }
+            for (const k in eventName) this.on(k, eventName[k], config);
             return this;
         }
 
         if (!this.eventListeners.has(eventName))
             this.eventListeners.set(eventName, new Set());
-        this.eventListeners.get(eventName).add(callback);
+
+        this.eventListeners.get(eventName).add({cb: callback, cfg: config});
         return this;
     }
-    one (eventName, callback) {
+    one (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.one(event, callback);
-            });
+            eventName.forEach(e => this.one(e, callback, config));
             return this;
         }
-
         if (typeof eventName === 'object') {
-            for (const key in eventName)
-                this.one(key, eventName[key]);
+            for (const k in eventName) this.one(k, eventName[k], config);
             return this;
         }
 
-        const onceWrapper = (data) => {
-            callback.call(this, data);
+        const onceWrapper = (...args) => {
+            callback.apply(this, args);
             this.off(eventName, onceWrapper);
         };
 
-        this.on(eventName, onceWrapper);
+        this.on(eventName, onceWrapper, config);
         return this;
     }
     trigger (eventName, ...args) {
+        args.push(eventName);
+
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => {
-                this.trigger(event, args);
-            })
+            eventName.forEach(e => this.trigger(e, ...args));
             return this;
         }
 
-        if (!this.eventListeners.has(eventName)) return this;
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
 
-        const listeners = this.eventListeners.get(eventName);
-        for (const callback of listeners)
-            callback.apply(this, args);
-
+        // We use Array.from to avoid errors if the listener is deleted during execution.
+        Array.from(set).forEach(({cb}) => cb.apply(this, args));
         return this;
     }
     off (eventName, callback) {
         if (Array.isArray(eventName)) {
-            eventName.forEach(event => this.off(event, callback));
+            eventName.forEach(e => this.off(e, callback));
             return this;
         }
-        if (this.eventListeners.has(eventName))
-            this.eventListeners.get(eventName).delete(callback);
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        if (callback) {
+            for (const item of set) {
+                if (item.cb === callback) {
+                    set.delete(item);
+                    break;
+                }
+            }
+        } else {
+            set.clear();
+        }
         return this;
+    }
+    clearEvents () {
+        for (const [eventName, set] of this.eventListeners.entries()) {
+            for (const item of [...set])
+                if (item.cfg?.removeable !== false) set.delete(item);
+            if (set.size === 0) this.eventListeners.delete(eventName);
+        }
     }
     /** ======== END ======== */
 
@@ -509,122 +567,124 @@ class Pixalo extends Utils {
     }
     /** ======== END ======== */
 
-    /** ======== BACKGROUNDS ======== */
-    addBackground (source, config = {}) {
-        this.background.add(source, config);
-        return this;
-    }
-    removeBackground (layerId) {
-        this.background.remove(layerId);
-        return this;
-    }
-    updateBackground (layerId, config) {
-        this.background.update(layerId, config);
-        return this;
-    }
-    clearBackgrounds () {
-        this.background.clear();
-        return this;
-    }
-    getBackground (layerId) {
-        this.background.get(layerId);
-        return this;
-    }
-    setBackgroundOrder (layerId, zIndex) {
-        this.background.setOrder(layerId, zIndex);
-        return this;
-    }
-    setBackgroundVisible (layerId, visible) {
-        this.background.setVisible(layerId, visible);
-        return this;
-    }
-    /** ======== END ======== */
-
-    /** ======== GRID ======== */
-    enableGrid () {
-        this.gridEnabled = true;
-        return this;
-    }
-    disableGrid () {
-        this.gridEnabled = false;
-        return this;
-    }
-    toggleGrid () {
-        this.gridEnabled = !this.gridEnabled;
-        return this;
-    }
-    setGridSize (width, height = width) {
-        this.grid.setSize(width, height);
-        return this;
-    }
-    setGridColors (color, majorColor) {
-        this.grid.setColors(color, majorColor);
-        return this;
-    }
-    setGridLineWidth (lineWidth, majorLineWidth) {
-        this.grid.setLineWidth(lineWidth, majorLineWidth);
-        return this;
-    }
-    setMajorGrid (every, color, lineWidth) {
-        this.grid.setMajorGrid(every, color, lineWidth);
-        return this;
-    }
-    setGridBounds (bounds) {
-        this.grid.setBounds(bounds);
-        return this;
-    }
-    setGridOrigin (x, y) {
-        this.grid.setOrigin(x, y);
-        return this;
-    }
-    setGridVisibilityRange (minZoom, maxZoom) {
-        this.grid.setVisibilityRange(minZoom, maxZoom);
-        return this;
-    }
-    snapToGrid (x, y) {
-        return this.grid.snapToGrid(x, y);
-    }
-    getGridCell (x, y) {
-        return this.grid.getGridCell(x, y);
-    }
-    cellToWorld (cellX, cellY) {
-        return this.grid.cellToWorld(cellX, cellY);
-    }
-    /** ======== END ======== */
-
     /** ======== CONTROLS ======== */
-    startLoop () {
+    fps (value) {
+        if (value === undefined)
+            return this.config.fps;
+
+        value = Math.max(1, ~~value);
+        this.config.fps   = value;
+        this.debugger.fps = {
+            target: value,
+            actual: value,
+            ratio : 100
+        };
+        this.maxDeltaTime = Math.max(1000 / value, 16.67);
+        return this;
+    }
+    start () {
+        if (!this.isReady)
+            throw new Error('Initialization is not done. Please use the "ready" event to check and then call the "start" function.');
+
+        if (this.running)
+            return this;
+
         this.running = true;
+        this.timers.forEach(timer => {
+            timer.isRunning = true;
+            timer.lastTime  = performance.now();
+        });
+        this.audio.resumeAll();
         requestAnimationFrame(this.loop.bind(this));
+        this.trigger('start');
+        return this;
+    }
+    freeze () {
+        if (!this.isReady) return this;
+        this.freezed = true;
+        this.trigger('freeze');
+        this.clearSortedEntities();
+        return this;
+    }
+    unfreeze () {
+        if (!this.isReady) return this;
+        this.freezed = false;
+        this.trigger('unfreeze');
+        this.clearSortedEntities();
+        return this;
+    }
+    stop () {
+        if (!this.isReady)
+            throw new Error('Initialization is not done. Please use the "ready" event to check and then call the "stop" function.');
+
+        this.running = false;
+        this.pressedKeys.clear();
+        this.timers.forEach(timer => {
+            timer.isRunning = false;
+        });
+        this.audio.pauseAll();
+        this.trigger('stop');
+        return this;
+    }
+    clear () {
+        if (this.ctx?.reset)
+            return this.ctx.reset();
+
+        // Full reset of transforms
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+        // Clearing the entire canvas while maintaining quality
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Drawing the background in global coordinates
+        this.ctx.fillStyle = this.config.background;
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
     loop (timestamp) {
-        if (!this.running) return;
+        if (!this.running || this.isScene) return;
 
         const frameInterval = 1000 / this.config.fps; // Time interval between each frame
         let deltaTime = timestamp - this.lastTime;
         deltaTime = Math.min(deltaTime, this.maxDeltaTime);
 
-        // Update FPS counter for every frame
         this.debugger._updateFPS(timestamp);
 
         // Execute frame only if enough time has passed
         if (deltaTime >= frameInterval) {
             this.deltaTime = deltaTime;
-            this.clear();
-            this.updateTimers(timestamp);
-            this.update(deltaTime);
+            if (!this.freezed) {
+                this.updateTimers(timestamp);
+                this.update(deltaTime);
+            }
             this.render();
-            this.lastTime = timestamp - (deltaTime % frameInterval); // Fine-tune the last frame time
+
+            const frameTime = timestamp - (deltaTime % frameInterval); // Fine-tune the last frame time
+            this.lastTime = frameTime;
+
+            for (const [, scene] of this.scenes) {
+                if (!scene.running) continue;
+
+                scene.deltaTime = deltaTime;
+                if (!scene.freezed) {
+                    scene.updateTimers(timestamp);
+                    scene.update(deltaTime);
+                }
+                scene.render();
+                scene.lastTime = frameTime;
+            }
+
+            this.debugger.renderPanel();
         }
 
         requestAnimationFrame(this.loop.bind(this));
     }
     update (deltaTime) {
-        this.camera.update();
+        if (!this.isScene)
+            this.camera.update();
 
         this.background._updateLayers(deltaTime);
 
-        if (this.tileMap.running)
+        if (this.tileMap && this.tileMap.running)
             this.tileMap.update();
 
         for (const [_, entity] of this.entities) {
@@ -645,138 +705,181 @@ class Pixalo extends Utils {
         this.trigger('update', deltaTime);
     }
     render () {
-        this.clear();
-        this.ctx.save();
-        this.ctx.scale(this.config.quality, this.config.quality);
-        this.camera.apply();
+        const ctx = this.ctx;
+        if (!this.isScene)
+            this.clear();
 
-        this.trigger('beforeRender', this.ctx);
+        ctx.save();
 
-        this.background._renderLayers(this.ctx, false);
+        if (!this.isScene)
+            ctx.scale(this.config.quality, this.config.quality);
 
-        if (this.tileMap.running)
+        // If it was a scene: Prevent ctx.save() from running to prevent memory leaks
+        this.camera.apply(!this.isScene);
+
+        this.trigger('beforeRender', ctx);
+
+        if (this.isScene && this.bounds)
+            this._renderSceneBounds(ctx);
+
+        this.background._renderLayers(ctx, false);
+
+        if (this.tileMap && this.tileMap.running)
             this.tileMap._renderMap();
 
-        const sortedEntities = Array.from(this.entities.values()).sort(
-            (a, b) => a.zIndex - b.zIndex
-        );
+        this.grid.render(ctx);
 
-        sortedEntities.forEach(entity => {
-            if (typeof entity.render === 'function') {
-                this.ctx.save();
-                entity.render(this.ctx);
-                this.ctx.restore();
-            }
-        });
+        if (!this.isScene)
+            this.getSortedEntitiesByZIndex(true, true).forEach(entity => entity?.render?.(ctx));
+        else if (!this.mergeable)
+            this.getSortedEntitiesByZIndex(true, false).forEach(entity => entity?.render?.(ctx));
 
-        this.trigger('render', this.ctx);
+        this.trigger('render', ctx);
 
-        this.emitters.render(this.ctx);
+        this.emitters.render(ctx);
+        this.background._renderLayers(ctx, true);
 
-        this.background._renderLayers(this.ctx, true);
+        if (!this.isScene)
+            this.debugger.render(ctx);
 
-        if (this.gridEnabled)
-            this.grid.render(this.ctx);
-
-        this.debugger.render(this.ctx);
-
-        this.trigger('afterRender', this.ctx);
-
-        this.ctx.restore();
-
-        this.debugger.renderPanel();
+        this.trigger('afterRender', ctx);
+        ctx.restore();
     }
-
-    start () {
-        if (this.running)
-            return this;
-
-        this.timers.forEach(timer => {
-            timer.isRunning = true;
-            timer.lastTime = performance.now();
-        });
-        this.audio.resumeAll();
-        this.startLoop();
-
-        this.trigger('start');
-
-        return this;
-    }
-    stop () {
-        this.running = false;
-        this.pressedKeys.clear();
-        this.timers.forEach(timer => {
-            timer.isRunning = false;
-        });
-        this.audio.pauseAll();
-        this.trigger('stop');
-        return this;
-    }
-    clear () {
-        // Full reset of transforms
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-        // Clearing the entire canvas while maintaining quality
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-        // Drawing the background in global coordinates
-        this.ctx.fillStyle = this.config.background;
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-    reset () {
+    reset (options = {}) {
+        options = {
+            assets    : true,
+            audio     : true,
+            animations: true,
+            scenes    : true,
+            ...options
+        };
         this.trigger('reset');
 
         // Stop the engine first
         this.stop();
 
         // Clear runtime data
-        this.pressedKeys.clear();
-        this.entities.clear();
-        this.eventListeners.clear();
+        this.freezed = false;
         this.timers.clear();
-        this.assets.clear();
+        this.pressedKeys.clear();
+        this.clearEvents();
+        this.entities.clear();
+        (this.parent || this).clearSortedEntities();
 
         // Reset subsystems
+        this.debugger.clearItems();
+
+        if (options.assets)
+            this.assets.clear();
+
+        if (options.scenes)
+            this.scenes.clear();
+
         this.collision.reset();
-        this.audio.cleanup();
-        this.camera.reset();
+
+        if (options.audio)
+            this.audio.cleanup();
+
+        if (!this.isScene)
+            this.camera.reset();
+
         this.background.clear();
         this.emitters.clear();
         this.physics.reset();
-        this.tileMap.reset();
+
+        if (this.tileMap)
+            this.tileMap.reset();
 
         // Reset state variables
         this.draggedEntity = null;
         this.draggedEntities.clear();
         this.hoveredEntity = null;
-        this.animations = {};
+        if (options.animations)
+            this.animations = {};
         this.lastTime = 0;
-
-        // Reset debugger
-        this.debugger.clearItems();
-
-        // Reset subsystem configurations to original config
-        this.gridEnabled = Boolean(this.config.grid);
-        this.physicsEnabled = Boolean(this.config.physics);
-        this.collisionEnabled = Boolean(this.config.collision);
 
         // Reinitialize subsystems with original config
         this.background = new Background(this);
-        this.camera = new Camera(this, this.config.camera);
-        this.grid = new Grid(this, this.config.grid || {});
-        this.physics = new Physics(this, this.config.physics);
-        this.collision = new Collision();
-        this.tileMap = new TileMap(this);
-        this.emitters = new Emitters(this);
+        this.camera     = new Camera(this, this.config.camera);
+        this.grid       = new Grid(this, this.config.grid || {});
+        this.physics    = new Physics(this, this.config.physics);
+        this.collision  = new Collision();
+        this.emitters   = new Emitters(this);
+        if (!this.isScene && this.tileMap)
+            this.tileMap = new TileMap(this);
 
-        // Reset canvas and context
-        this.clear();
-        this._applyQuality(this.config.quality);
+        if (!this.isScene) {
+            // Reset canvas and context
+            this.clear();
+            this._applyQuality(this.config.quality);
 
-        // Reset canvas to original config
-        this._applyCanvasConfig();
+            // Reset canvas to original config
+            this._applyCanvasConfig();
+        }
 
         return this;
+    }
+    /** ======== END ======== */
+
+    /** ======== SCENES ======== */
+    scene (name, config = {}) {
+        if (this.scenes.has(name)) return this.scenes.get(name);
+
+        const scene = new Pixalo({
+            ...config,
+            isScene: true,
+            canvas : this.canvas,
+            ctx    : this.ctx
+        });
+
+        // References
+        scene.parent      = this;
+        scene.window      = this.window;
+        scene.config      = this.config;
+
+        // Overrides
+        scene.debugger    = this.debugger;
+        scene.camera      = this.camera;
+
+        // Save scene
+        scene.id          = name;
+        scene.zIndex      = config.zIndex    || this.scenes.size + 1;
+        scene.mergeable   = config.mergeable || false;
+        scene.constrain   = config.constrain || true;
+        scene.interactive = ['off', 'catch', 'flow'].includes(config.interactive) ? config.interactive : 'flow';
+        scene.bounds      = {
+            width : this.int(config.width, this.baseWidth),
+            height: this.int(config.height, this.baseHeight),
+            x     : this.int(config.x, 0),
+            y     : this.int(config.y, 0),
+            fill  : config.fill   || 'transparent',
+            stroke: config.stroke || 'transparent'
+        };
+
+        this.scenes.set(scene.id, scene);
+        return scene;
+    }
+    sortedScenes () {
+        return [...this.scenes.values()].filter(s => s.running).sort(
+            (a, b) => b.zIndex - a.zIndex
+        );
+    }
+    rootParent (callback) {
+        let current = this;
+        while (current.parent) {
+            callback?.(current);
+            current = current.parent;
+        }
+        return current;
+    }
+    _renderSceneBounds (ctx) {
+        const {fill, stroke, x, y, width, height} = this.bounds;
+        ctx.fillStyle   = fill;
+        ctx.strokeStyle = stroke;
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.fill();
+        ctx.stroke();
     }
     /** ======== END ======== */
 
@@ -810,191 +913,16 @@ class Pixalo extends Utils {
     }
     /** ======== END ======== */
 
-    /** ======== ASSETS ======== */
-    async loadAsset (type, id, src, config = {}) {
-        if (!type || !id || !src)
-            return Promise.reject(new Error("Invalid parameters for Assets.load"));
-
-        if (this.assets.has(id))
-            return Promise.resolve(this.assets.get(id));
-
-        return new Promise(async (resolve, reject) => {
-            let asset;
-
-            switch (type.toLowerCase()) {
-                case 'image':
-                case 'tiles':
-                    try {
-                        const response = await fetch(src);
-                        if (!response.ok) {
-                            throw new Error(`Failed to fetch image: ${response.statusText}`);
-                        }
-
-                        const blob = await response.blob();
-                        const bitmapOptions = {
-                            colorSpaceConversion: 'default',
-                            imageOrientation: 'from-image',
-                            premultiplyAlpha: 'default',
-                            ...config.bitmap || {}
-                        };
-                        asset = await createImageBitmap(blob, bitmapOptions);
-
-                        if (type.toLowerCase() === 'tiles') {
-                            if (!config.tileSize) {
-                                this.warn('No tileSize specified for tiles');
-                                config.tileSize = 32; // Default value
-                            }
-
-                            if (!config.tiles) {
-                                this.warn('No tiles configuration specified for tiles');
-                                config.tiles = {};
-                            }
-
-                            // Calculating the number of rows and columns
-                            config.columns = Math.floor(asset.width / config.tileSize);
-                            config.rows = Math.floor(asset.height / config.tileSize);
-
-                            // Convert relative coordinates to absolute for each tile
-                            for (const [name, coords] of Object.entries(config.tiles)) {
-                                if (Array.isArray(coords)) {
-                                    const [x, y] = coords;
-                                    config.tiles[name] = {
-                                        x: x * config.tileSize,
-                                        y: y * config.tileSize,
-                                        width: config.tileSize,
-                                        height: config.tileSize
-                                    };
-                                }
-                            }
-                        }
-
-                        this.#applyAssetConfig(asset, config);
-                        this.assets.set(id, {id, asset, config, type});
-                        resolve({asset, config, type});
-                    } catch (error) {
-                        reject(new Error(`Failed to load image: ${error.message}`));
-                    }
-                    break;
-                case 'spritesheet':
-                    try {
-                        const response = await fetch(src);
-                        if (!response.ok) {
-                            throw new Error(`Failed to fetch spritesheet: ${response.statusText}`);
-                        }
-
-                        const blob = await response.blob();
-                        asset = await createImageBitmap(blob, config.bitmap || {});
-
-                        // Validation of essential parameters
-                        const requiredParams = ['columns', 'rows', 'width', 'height'];
-                        for (const param of requiredParams) {
-                            if (!config[param]) {
-                                this.error(`Missing required parameter: ${param}`);
-                                throw new Error(`Missing required parameter: ${param}`);
-                            }
-                        }
-
-                        // Setting default values for offset and margin
-                        config.originOffset = config.originOffset || [0, 0];
-                        config.margin = config.margin || [0, 0];
-
-                        // Validating the structure of offset and margin arrays
-                        if (!Array.isArray(config.originOffset) || config.originOffset.length !== 2)
-                            config.originOffset = [0, 0];
-                        if (!Array.isArray(config.margin) || config.margin.length !== 2)
-                            config.margin = [0, 0];
-
-                        // Calculate the total number of frames
-                        config.totalFrames = config.columns * config.rows;
-
-                        // Create a frames array by calculating the position of each frame
-                        config.frames = [];
-                        for (let row = 0; row < config.rows; row++) {
-                            for (let col = 0; col < config.columns; col++) {
-                                config.frames.push({
-                                    x: config.originOffset[0] + col * (config.width + config.margin[0]),
-                                    y: config.originOffset[1] + row * (config.height + config.margin[1]),
-                                    width: config.width,
-                                    height: config.height
-                                });
-                            }
-                        }
-
-                        // Save assets to the assets collection
-                        this.assets.set(id, {id, asset, config, type});
-
-                        // Announcing successful upload
-                        resolve({asset, config, type});
-                    } catch (error) {
-                        reject(new Error(`Failed to load spritesheet: ${error.message}`));
-                    }
-                    break;
-                case 'audio':
-                    if (this.config.worker) {
-                        this.audio.load(id, src, config);
-                        const wait_for_download = event => {
-                            if (event.data.type === 'pixalo_audio_loaded') {
-                                resolve();
-                                this.off('worker_msg', wait_for_download);
-                            }
-                        };
-                        this.on('worker_msg', wait_for_download)
-                    } else {
-                        this.audio.load(id, src, config).then(resolve).catch(reject);
-                    }
-                    break;
-                default:
-                    reject(new Error(`Unsupported asset type: ${type}`));
-            }
-        });
-    }
-    getAsset (id) {
-        return this.assets.get(id) || null;
-    }
-    deleteAsset (id) {
-        this.assets.delete(id);
-        return this;
-    }
-    clearAssets () {
-        this.assets.clear();
-        return this;
-    }
-    #applyAssetConfig (asset, config) {
-        if (config.tileSize) return;
-
-        for (const key in config) {
-            if (key in asset) {
-                try {
-                    asset[key] = config[key];
-                } catch (e) {
-                    this.warn(`Failed to set property "${key}" on asset:`, e);
-                }
-            }
-        }
-    }
-    /** ======== END ASSETS ======== */
-
     /** ======== ENTITIES ======== */
-    defineAnimation (name, keyframes, options = {}) {
-        this.animations[name] = {
-            keyframes,
-            options: {
-                duration: options.duration || 1000,
-                repeat: options.repeat || 0,
-                easing: options.easing || 'linear'
-            }
-        };
-        return this;
-    }
     append (id, config = {}) {
         // Convert input to Entity instance if needed
         const entity = id instanceof Entity ? id : (
             config instanceof Entity ? config : new Entity(id, {...config, engine: this})
         );
+        const rootParent = this.rootParent();
     
         // Handle duplicate IDs
-        if (this.getEntities().has(entity.id)) {
-            // entity.id = `${entity.id}_${Date.now()}`;
+        if (rootParent.mergeEntities(false, true).has(entity.id)) {
             this.error(`Entity (${entity.id}) exists with this ID`);
             return entity;
         }
@@ -1007,11 +935,17 @@ class Pixalo extends Utils {
         entity.updatePosition?.();
     
         // Handle physics if enabled
-        if (this.physicsEnabled && (entity.physics || config.physics)) {
-            this.physics.addEntity(entity, entity.physics || config.physics);
+        if (entity.physics || config.physics) {
+            if (this.physicsEnabled)
+                this.physics.addEntity(entity, entity.physics || config.physics);
+            else if (this.mergeable && rootParent.physicsEnabled) {
+                rootParent.physics.addEntity(entity, entity.physics || config.physics);
+            }
         }
 
         this.debugger.addItem(entity.id, entity);
+
+        (this.parent || this).clearSortedEntities();
     
         return entity;
     }
@@ -1027,8 +961,16 @@ class Pixalo extends Utils {
         this.entities.forEach(walk);
         return map;
     }
-    getSortedEntitiesByZIndex () {
-        return Array.from(this.entities.values()).sort((a, b) => b.zIndex - a.zIndex);
+    mergeEntities (onlyParents = true, forceMerge = false) {
+        const entities = this.getEntities(onlyParents);
+        const scenes   = [...this.scenes.values()].filter(scene => scene.running && (scene.mergeable || forceMerge)).flatMap(
+            scene => [...scene.getEntities(onlyParents)]
+        );
+        return new Map([...entities, ...scenes]);
+    }
+    getSortedEntitiesByZIndex (onlyParents = true, merge = false, forceMerge = false) {
+        const entities = (merge ? this.mergeEntities(onlyParents, forceMerge) : this.getEntities(onlyParents)).values();
+        return [...entities].sort((a, b) => a.zIndex - b.zIndex);
     }
     find (entityId) {
         return this.entities.get(entityId);
@@ -1083,15 +1025,27 @@ class Pixalo extends Utils {
     isEntity (target) {
         return target instanceof Entity;
     }
-    kill (entityId) {
-        const entity = this.entities.get(entityId);
-        return entity ? entity.kill() : false;
+    isEntities (target) {
+        if (!(target instanceof Map)) return false;
+        for (const [key, value] of target)
+            if (typeof key !== 'string' || !(value instanceof Entity))
+                return false;
+        return true;
+    }
+    kill (entity) {
+        entity = this.isEntity(entity) ? entity : this.findDeep(entity);
+        entity?.kill?.();
+        return this;
     }
     /** ======== END ======== */
 
     /** ======== COLLISIONS ======== */
     enableCollisions () {
         this.collisionEnabled = true;
+        return this;
+    }
+    disableCollisions () {
+        this.collisionEnabled = false;
         return this;
     }
     checkCollision (entityA, entityB) {
@@ -1106,94 +1060,6 @@ class Pixalo extends Utils {
             }
         }
         return false;
-    }
-    disableCollisions () {
-        this.collisionEnabled = false;
-        return this;
-    }
-    /** ======== END ======== */
-
-    /** ======== EMITTERS ======== */
-    createEmitter (id, config) {
-        return this.emitters.create(id, config);
-    }
-    /** ======== END ======== */
-
-    /** ======== SCREENSHOT ======== */
-    shot (options = {}) {
-        const {
-            format = 'png',
-            quality = 1.0,
-            backgroundColor = this.config.background,
-            download = false,
-            filename = `pixalo-screenshot-${Date.now()}`
-        } = options;
-
-        // Validate parameters
-        if (!['png', 'jpeg', 'webp'].includes(format.toLowerCase()))
-            return this.error('Invalid format. Supported formats are: png, jpeg, webp');
-
-        if (quality < 0 || quality > 1)
-            return this.error('Quality must be between 0 and 1');
-
-        if (this.config.worker) {
-            return new Promise(resolve => {
-                this.workerSend({
-                    action: 'take_screenshot',
-                    ...options
-                }, 'screenshot_taken', event => resolve({
-                    ...event.data.details,
-                    revoke: () => URL.revokeObjectURL(blobURL)
-                }));
-            });
-        }
-
-        // Create a temporary canvas to handle the screenshot
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
-
-        // Set the dimensions to match the original canvas
-        tempCanvas.width = this.canvas.width;
-        tempCanvas.height = this.canvas.height;
-
-        // Fill background if specified
-        if (backgroundColor) {
-            tempCtx.fillStyle = backgroundColor;
-            tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-        }
-
-        // Draw the current canvas content
-        tempCtx.drawImage(this.canvas, 0, 0);
-
-        // Convert to data URL
-        const mimeType = `image/${format.toLowerCase()}`;
-        const dataURL = tempCanvas.toDataURL(mimeType, quality);
-
-        // Convert to Blob
-        const blob = Pixalo.dataURLToBlob(dataURL);
-
-        // Create Blob URL
-        const blobURL = URL.createObjectURL(blob);
-
-        // Handle download if requested
-        if (download) {
-            const link = document.createElement('a');
-            link.download = `${filename}.${format.toLowerCase()}`;
-            link.href = dataURL;
-            link.click();
-        }
-
-        // Cleanup
-        tempCanvas.remove();
-
-        return {
-            dataURL,
-            blob,
-            blobURL,
-            width: tempCanvas.width,
-            height: tempCanvas.height,
-            revoke: () => URL.revokeObjectURL(blobURL)
-        };
     }
     /** ======== END ======== */
 

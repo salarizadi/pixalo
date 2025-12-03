@@ -292,7 +292,7 @@ class Emitter {
             rotation: this.randomizeValue(this.particle.rotation),
             rotationSpeed: this.randomizeValue(this.particle.rotationSpeed),
             lifetime: this.emission.lifetime,
-            texture: this.engine.getAsset(this.particle.texture)?.asset,
+            texture: this.engine.assets.get(this.particle.texture)?.asset,
         });
 
         this.particles.push(particle);

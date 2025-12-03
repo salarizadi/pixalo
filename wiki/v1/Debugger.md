@@ -702,7 +702,7 @@ const exportDebugInfo = () => {
         systems: {
             physics: game.physicsEnabled,
             collision: game.collisionEnabled,
-            grid: game.gridEnabled
+            grid: game.grid.enabled
         },
         performance: {
             canvas: {

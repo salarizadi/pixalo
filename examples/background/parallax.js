@@ -15,15 +15,15 @@ const game = new Pixalo('#canvas', {
 });
 
 await game.wait(
-    game.loadAsset('image', 'background',  'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/background.png'),
-    game.loadAsset('image', 'moon',        'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/moon.png'),
-    game.loadAsset('image', 'bottom-clouds','https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/bottom-clouds.png'),
-    game.loadAsset('image', 'top-clouds',  'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/top-clouds.png')
+    game.assets.load('image', 'background',  'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/background.png'),
+    game.assets.load('image', 'moon',        'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/moon.png'),
+    game.assets.load('image', 'bottom-clouds','https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/bottom-clouds.png'),
+    game.assets.load('image', 'top-clouds',  'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/cloudscape/top-clouds.png')
 );
 game.start();
 
 // 1) Fixed sky (motionless)
-game.addBackground('background', {
+game.background.add('background', {
     width   : game.baseWidth,
     height  : game.baseHeight,
     repeat  : 'x',
@@ -31,20 +31,20 @@ game.addBackground('background', {
 });
 
 // 2) The moon moves a little with the camera.
-game.addBackground('moon', {
+game.background.add('moon', {
     parallax: 0.2,     // 20% movement relative to the camera
     zIndex  : 10
 });
 
 // 3) Medium-speed clouds
-game.addBackground('top-clouds', {
+game.background.add('top-clouds', {
     repeat  : 'x',
     parallax: 0.4,     // 40% movement
     zIndex  : 20
 });
 
 // 4) Clouds near the fastest parallax movement + in front of the camera
-game.addBackground('bottom-clouds', {
+game.background.add('bottom-clouds', {
     top     : true,
     repeat  : 'x',
     parallax: 0.7,     // 70% movement (seems to be very close)

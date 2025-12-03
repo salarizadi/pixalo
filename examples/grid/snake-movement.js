@@ -10,23 +10,22 @@
 import Pixalo from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
 
 const game = new Pixalo('#canvas', {
-    width: window.innerWidth,
-    height: window.innerHeight,
-    background: '#f4f4f4',
-    grids: {
+    width : innerWidth,
+    height: innerHeight,
+    background: '#031C1B',
+    grid: {
         width: 40,
         height: 40,
-        color: 'rgba(0,0,0,0.08)',
+        color: 'rgba(255,255,255,1)',
         lineWidth: 1,
-        majorGridEvery: 5,
-        majorColor: 'rgba(0,0,0,0.2)',
+        majorColor: 'rgba(255,255,255,1)',
         majorLineWidth: 1,
         minZoomToShow: 0.2,
         maxZoomToShow: 5
     }
 });
 game.start();
-game.enableGrid();
+game.grid.enable();
 
 // snake head
 const head = game.append('head', {
@@ -41,7 +40,7 @@ const head = game.append('head', {
 function move (dx, dy) {
     const cx = Math.round(head.x / game.grid.width) + dx;
     const cy = Math.round(head.y / game.grid.height) + dy;
-    const snapped = game.cellToWorld(cx, cy);
+    const snapped = game.grid.cellToWorld(cx, cy);
     head.move({
         x: snapped.x,
         y: snapped.y,

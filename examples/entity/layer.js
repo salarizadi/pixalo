@@ -15,7 +15,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('image', 'character', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/character.png');
+await game.assets.load('image', 'character', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/character.png');
 
 game.append('entity-1', {
     width: 100,

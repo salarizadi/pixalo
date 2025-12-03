@@ -16,7 +16,7 @@ const game = new Pixalo('#canvas', {
 });
 game.start();
 
-await game.loadAsset('spritesheet', 'kennyCards', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/kennyCards.png', {
+await game.assets.load('spritesheet', 'kennyCards', 'https://raw.githubusercontent.com/pixalo/pixalo/refs/heads/main/examples/assets/spritesheets/kennyCards.png', {
     width: 65,
     height: 65,
     columns: 14,
@@ -30,7 +30,7 @@ await game.loadAsset('spritesheet', 'kennyCards', 'https://raw.githubusercontent
     console.log(asset);
 });
 
-game.append('rpg_character', {
+game.append('card', {
     width: 100,
     height: 150,
     x: (game.baseWidth  - 100) / 2,

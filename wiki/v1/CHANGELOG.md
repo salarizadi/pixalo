@@ -1,5 +1,140 @@
 # CHANGELOG
 
+## [1.3.0] - 2025-12-02
+
+### 🚀 Performance & Stability
+Pixalo has been significantly optimized with improved frame rate stability and enhanced reliability across all features.
+
+### ✨ New Features
+
+#### Multi-Scene Architecture
+- Create and manage multiple independent scenes with isolated entities, physics, and rendering pipelines
+- Each scene can have its own lifecycle, event handling, and visual layers
+- Support for nested scenes and scene transitions
+
+#### Assets Management System
+- New `Assets` class for centralized resource management
+- Better loading, caching, and cleanup of images, audio, and other resources
+- Improved asset lifecycle control
+
+### 🔄 Breaking Changes
+
+#### `Pixalo` Class - Method Migration
+
+Several methods have been moved to their respective classes for better organization:
+
+**Assets** (use `game.assets.*`)
+- ~~`loadAsset`~~ → `game.assets.load()`
+- ~~`getAsset`~~ → `game.assets.get()`
+- ~~`deleteAsset`~~ → `game.assets.delete()`
+- ~~`clearAssets`~~ → `game.assets.clear()`
+
+**Background** (use `game.background.*`)
+- ~~`addBackground`~~ → `game.background.add()`
+- ~~`removeBackground`~~ → `game.background.remove()`
+- ~~`updateBackground`~~ → `game.background.update()`
+- ~~`clearBackgrounds`~~ → `game.background.clear()`
+- ~~`getBackground`~~ → `game.background.get()`
+- ~~`setBackgroundOrder`~~ → `game.background.setOrder()`
+- ~~`setBackgroundVisible`~~ → `game.background.setVisible()`
+
+**Grid** (use `game.grid.*`)
+- ~~`enableGrid`~~ → `game.grid.enable()`
+- ~~`disableGrid`~~ → `game.grid.disable()`
+- ~~`toggleGrid`~~ → `game.grid.toggle()`
+- ~~`setGridSize`~~ → `game.grid.setSize()`
+- ~~`setGridColors`~~ → `game.grid.setColors()`
+- ~~`setGridLineWidth`~~ → `game.grid.setLineWidth()`
+- ~~`setMajorGrid`~~ → `game.grid.setMajor()`
+- ~~`setGridBounds`~~ → `game.grid.setBounds()`
+- ~~`setGridOrigin`~~ → `game.grid.setOrigin()`
+- ~~`setGridVisibilityRange`~~ → `game.grid.setVisibilityRange()`
+- ~~`snapToGrid`~~ → `game.grid.snapToGrid()`
+- ~~`getGridCell`~~ → `game.grid.getGridCell()`
+- ~~`cellToWorld`~~ → `game.grid.cellToWorld()`
+
+**Emitters** (use `game.emitters.*`)
+- ~~`createEmitter`~~ → `game.emitters.create()`
+
+### 🆕 New Methods
+
+#### `Pixalo` Class
+**Lifecycle & Control**
+- `fps()` - Get/set target frame rate
+- `freeze()` - Pause updates while keeping rendering
+- `unfreeze()` - Resume updates after freeze
+
+**Scene Management**
+- `scene()` - Create or get a scene
+- `sortedScenes()` - Get scenes sorted by z-index
+- `rootParent()` - Traverse to root engine
+- `isPointInScene()` - Check if point is inside scene bounds
+
+**Entity Management**
+- `mergeEntities()` - Merge entities from scenes
+- `isEntities()` - Validate entities Map
+
+**Utilities**
+- `animate()` - Create frame-based animations
+- `worldSize()` - Get world dimensions
+- `int()` - Safe number conversion
+- `clearEvents()` - Remove all removeable event listeners
+
+#### `Debugger` Class
+- Added **Scenes** statistics panel showing active scenes and their states
+
+#### `Entity` Class
+**State Checks**
+- `isChild()` - Check if entity has a parent
+- `isInteractive()` - Check if entity receives events
+
+**Hierarchy & Events**
+- `rootParent()` - Get root parent entity
+- `sortByZIndex()` - Get sorted children
+- `clearEvents()` - Clear entity event listeners
+
+**Animations & Styling**
+- `stopTransition()` - Cancel active transition
+- `getClass()` - Get class names as string
+
+### 📝 Migration Guide
+
+```javascript
+// Before v1.3.0
+await game.loadAsset('image', 'player', 'path/player.png');
+game.addBackground('sky');
+game.enableGrid();
+game.createEmitter('explosion', {});
+
+// After v1.3.0
+await game.assets.load('image', 'player', 'path/player.png');
+game.background.add('sky');
+game.grid.enable();
+game.emitters.create('explosion', {});
+```
+
+### 🐛 Bug Fixes
+- Fixed frame rate inconsistencies in high-load scenarios
+- Improved entity sorting performance for better rendering order
+- Fixed memory leaks in event listener management
+
+### 📚 Documentation
+- Complete rewrite of Scene management documentation
+- Added migration guide for breaking changes
+- Expanded examples for all new features
+- Updated API reference with detailed usage examples
+
+### 🔑 Key Changes
+- **Mouse & Touch Events**: Complete overhaul of mouse and touch event handling system
+    - Proper event ordering respecting entity z-index and scene hierarchy
+    - Added `stopPropagation()` support to prevent event bubbling
+    - Scene-based event isolation with `interactive` modes (`'off'`, `'catch'`, `'flow'`)
+    - Fixed event handling for nested entities and scenes
+    - Improved multi-touch support with proper touch tracking
+    - Enhanced drag & drop functionality across scenes
+
+---
+
 ## [1.2.0] - 2025-10-31
 
 ### 🔧 Issues Resolved
