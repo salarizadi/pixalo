@@ -1274,7 +1274,7 @@ class Entity {
         ctx.transform(1, this.styles.skewY, this.styles.skewX, 1, 0, 0);
 
         // Apply base styles
-        ctx.globalAlpha = this.styles.opacity;
+        ctx.globalAlpha = (this.parent?.styles.opacity ?? 1) * this.styles.opacity;
         ctx.globalCompositeOperation = this.styles.blendMode;
 
         // Apply filters

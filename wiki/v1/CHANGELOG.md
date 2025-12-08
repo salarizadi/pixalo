@@ -120,9 +120,10 @@ game.emitters.create('explosion', {});
 - Fixed memory leaks
 - Improved entity sorting performance for better rendering order
 - Fixed an issue where `BackgroundImage` would not render in different `Entity` shapes.
+- Fixed `opacity` inheritance where `child entities` were not affected by parent `opacity` values
 
 ### 📚 Documentation
-- Complete rewrite of Scene management documentation
+- Complete writing of `Scene` management documentation
 - Added migration guide for breaking changes
 - Expanded examples for all new features
 - Updated API reference with detailed usage examples
