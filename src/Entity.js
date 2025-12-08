@@ -7,77 +7,76 @@
 class Entity {
 
     constructor (id, config = {}) {
-        this.engine = config.engine;
-
-        this.id = id;
+        this.engine      = config.engine;
+        this.id          = id;
 
         const classNames = config.class || '';
-        this.class = new Set(classNames.split(/\s+/).filter(Boolean));
+        this.class       = new Set(classNames.split(/\s+/).filter(Boolean));
 
-        this.x = config.x || 0;
-        this.y = config.y || 0;
-        this.absoluteX = this.x;
-        this.absoluteY = this.y;
+        this.x           = config.x || 0;
+        this.y           = config.y || 0;
+        this.absoluteX   = this.x;
+        this.absoluteY   = this.y;
 
-        this.width  = config.width  || 32;
-        this.height = config.height || 32;
+        this.width       = config.width  || 32;
+        this.height      = config.height || 32;
 
-        this.parent   = null;
-        this.children = new Map();
+        this.parent      = null;
+        this.children    = new Map();
         this.constrainToParent = config.constrainToParent ?? true;
 
         this.styles = {
             ...this.#normalizeBackground(config),
 
-            shape: config.shape || 'rectangle',
+            shape        : config.shape         || 'rectangle',
 
-            position: config.position || 'absolute',
+            position     : config.position      || 'absolute',
 
-            blur: config.blur || 0,
-            opacity: config.opacity ?? 1,
+            blur         : config.blur          || 0,
+            opacity      : config.opacity       ?? 1,
 
-            borderColor: config.borderColor,
-            borderWidth: config.borderWidth || 0,
-            borderStyle: config.borderStyle || 'solid',
-            borderRadius: config.borderRadius || 0,
+            borderColor  : config.borderColor,
+            borderWidth  : config.borderWidth   || 0,
+            borderStyle  : config.borderStyle   || 'solid',
+            borderRadius : config.borderRadius  || 0,
 
-            shadowColor: config.shadowColor,
-            shadowBlur: config.shadowBlur || 0,
+            shadowColor  : config.shadowColor,
+            shadowBlur   : config.shadowBlur    || 0,
             shadowOffsetX: config.shadowOffsetX || 0,
             shadowOffsetY: config.shadowOffsetY || 0,
 
-            rotation: config.rotation || 0,
+            rotation     : config.rotation      || 0,
 
-            scale: config.scale   || 1,
-            scaleX: config.scaleX || 1,
-            scaleY: config.scaleY || 1,
+            scale        : config.scale         || 1,
+            scaleX       : config.scaleX        || 1,
+            scaleY       : config.scaleY        || 1,
 
-            skewX: config.skewX || 0,
-            skewY: config.skewY || 0,
+            skewX        : config.skewX         || 0,
+            skewY        : config.skewY         || 0,
 
-            flipX: config.flipX || false,
-            flipY: config.flipY || false,
+            flipX        : config.flipX         || false,
+            flipY        : config.flipY         || false,
 
-            text: config.text,
-            font: config.font || '16px Arial',
-            color: config.color || '#000000',
-            textAlign: config.textAlign || 'center',
-            lineHeight: config.lineHeight || 1.2,
-            textBaseline: config.textBaseline || 'middle',
+            text         : config.text,
+            font         : config.font          || '16px Arial',
+            color        : config.color         || '#000000',
+            textAlign    : config.textAlign     || 'center',
+            lineHeight   : config.lineHeight    || 1.2,
+            textBaseline : config.textBaseline  || 'middle',
 
-            transition: config.transition || {},
+            transition   : config.transition    || {},
 
-            visible: config.visible ?? true,
-            blendMode: config.blendMode || 'source-over',
+            visible      : config.visible       ?? true,
+            blendMode    : config.blendMode     || 'source-over',
 
-            clip: config.clip,
-            mask: config.mask,
-            filter: config.filter,
+            clip         : config.clip,
+            mask         : config.mask,
+            filter       : config.filter,
 
-            points: config.points || [],
-            customPath: config.customPath ? config.customPath.bind(this) : null,
+            points       : config.points        || [],
+            customPath   : config.customPath ? config.customPath.bind(this) : null,
 
-            spikes: config.spikes || 5
+            spikes       : config.spikes        || 5
         };
 
         this.dataset = new Map();
@@ -95,7 +94,7 @@ class Entity {
             x: config.collision?.x || 0,
             y: config.collision?.y || 0
         };
-        this.physics = config.physics ?? false;
+        this.physics   = config.physics ?? false;
 
         this.events = {
             hoverable  : Boolean(config.hoverable),
@@ -1255,15 +1254,14 @@ class Entity {
         if (!this.styles.visible) return;
 
         // Checking if the entity is in the camera's view
-        if (!this.engine.camera.inView(this))
-            return;
+        if (!this.engine.camera.inView(this)) return;
 
         if (this.styles.position === 'fixed')
             this.updatePosition();
 
         ctx.save();
 
-        // Calling the beforeRender event before applying any changes
+        // Calling the `beforeRender` event before applying any changes
         this.trigger('beforeRender', ctx);
 
         // Apply transforms
@@ -1276,7 +1274,7 @@ class Entity {
         ctx.transform(1, this.styles.skewY, this.styles.skewX, 1, 0, 0);
 
         // Apply base styles
-        ctx.globalAlpha = this.styles.opacity;
+        ctx.globalAlpha = (this.parent?.styles.opacity ?? 1) * this.styles.opacity;
         ctx.globalCompositeOperation = this.styles.blendMode;
 
         // Apply filters
@@ -1286,50 +1284,33 @@ class Entity {
         this._applyClip(ctx);
 
         // Apply shadow
-        if (this.styles.shadowColor) {
-            ctx.shadowColor = this.styles.shadowColor;
-            ctx.shadowBlur = this.styles.shadowBlur;
-            ctx.shadowOffsetX = this.styles.shadowOffsetX;
-            ctx.shadowOffsetY = this.styles.shadowOffsetY;
-        }
+        this._applyShadow(ctx);
 
-        // Apply borderRadius
-        const hasBorderRadius = this.styles.borderRadius > 0;
-        if (hasBorderRadius) {
-            ctx.save();
-            this._clipPath(ctx);
-        }
-
-        // Calling the render event after applying transforms and before rendering the content
+        // Calling the `render` event after applying transforms and before rendering the content
         this.trigger('render', ctx);
 
         // Render content
-        if (this.sprite) {
+        if (this.sprite)
             this._renderSprite(ctx);
-        } else {
-            if (this.styles.backgroundImage) {
-                this._renderBackgroundImage(ctx);
-            }
-            if (this.styles.customPath) {
+        else {
+            if (this.styles.customPath)
                 this._renderCustomPath(ctx);
-            } else {
+            else
                 this.renderShape(ctx);
-            }
+
+            // Render image in shape
+            if (this.styles.backgroundImage)
+                this._renderBackgroundImage(ctx);
         }
 
-        if (this.styles.text) {
+        // Render text
+        if (this.styles.text)
             this._renderText(ctx);
-        }
 
         // Apply mask
         this._applyMask(ctx);
 
-        // Restore context for borderRadius
-        if (hasBorderRadius) {
-            ctx.restore();
-        }
-
-        // Calling the afterRender event before the final restore
+        // Calling the `afterRender` event before the final restore
         this.trigger('afterRender', ctx);
 
         ctx.restore();
@@ -1340,20 +1321,11 @@ class Entity {
     }
     renderShape (ctx) {
         switch (this.styles.shape) {
-            case 'circle':
-                this.renderCircle(ctx);
-                break;
-            case 'triangle':
-                this.renderTriangle(ctx);
-                break;
-            case 'star':
-                this.renderStar(ctx);
-                break;
-            case 'polygon':
-                this.renderPolygon(ctx);
-                break;
-            default:
-                this.renderRectangle(ctx);
+            case 'rectangle': this.renderRectangle(ctx); break;
+            case 'circle'   : this.renderCircle(ctx);    break;
+            case 'triangle' : this.renderTriangle(ctx);  break;
+            case 'star'     : this.renderStar(ctx);      break;
+            case 'polygon'  : this.renderPolygon(ctx);   break;
         }
     }
     renderRectangle (ctx) {
@@ -1388,6 +1360,7 @@ class Entity {
     renderTriangle (ctx) {
         const w = this.width;
         const h = this.height;
+        
         ctx.beginPath();
         ctx.moveTo(0, -h / 2);
         ctx.lineTo(w / 2, h / 2);
@@ -1436,8 +1409,7 @@ class Entity {
 
     fillAndStroke (ctx) {
         if (this.styles.backgroundGradient) {
-            const gradient = this._createGradient(ctx);
-            ctx.fillStyle = gradient;
+            ctx.fillStyle = this._createGradient(ctx);
         } else {
             ctx.fillStyle = this.styles.backgroundColor || this.styles.fill;
         }
@@ -1506,27 +1478,22 @@ class Entity {
         ctx.closePath();
     }
     _renderBackgroundImage (ctx) {
-        if (!this.styles.backgroundImage) return;
+        const image      = this.styles.backgroundImage;
+        const source     = this.styles.backgroundImageSource;
+        const fit        = this.styles.backgroundImageFit;
+        const position   = this.styles.backgroundImagePosition;
+        const repeat     = this.styles.backgroundImageRepeat;
 
-        if (this.styles.borderRadius > 0) {
-            this._clipPath(ctx);
-        }
-
-        this.style('backgroundColor', 'transparent');
-
-        const image = this.styles.backgroundImage;
-        const source = this.styles.backgroundImageSource;
-        const fit = this.styles.backgroundImageFit;
-        const position = this.styles.backgroundImagePosition;
-        const repeat = this.styles.backgroundImageRepeat;
-
-        let targetWidth = this.width;
+        let targetWidth  = this.width;
         let targetHeight = this.height;
-        let targetX = -this.width / 2;
-        let targetY = -this.height / 2;
+        let targetX      = -this.width / 2;
+        let targetY      = -this.height / 2;
+
+        // Render in shape
+        ctx.clip();
 
         if (!repeat) {
-            const imageWidth = source ? source.width : image.width;
+            const imageWidth  = source ? source.width : image.width;
             const imageHeight = source ? source.height : image.height;
 
             const scale = fit === 'contain' ? Math.min(
@@ -1536,7 +1503,7 @@ class Entity {
             ) : 1;
 
             if (fit !== 'stretch') {
-                targetWidth = imageWidth * scale;
+                targetWidth  = imageWidth * scale;
                 targetHeight = imageHeight * scale;
             }
 
@@ -1553,8 +1520,8 @@ class Entity {
             if (source) {
                 ctx.drawImage(
                     image,
-                    source.x, source.y, source.width, source.height, // source
-                    targetX, targetY, targetWidth, targetHeight     // destination
+                    source.x, source.y, source.width, source.height,
+                    targetX, targetY, targetWidth, targetHeight
                 );
             } else {
                 ctx.drawImage(image, targetX, targetY, targetWidth, targetHeight);
@@ -1594,27 +1561,6 @@ class Entity {
             ctx.fillText(line, textX, textY);
         });
     }
-    _clipPath (ctx) {
-        // Create a clipping path based on shape and borderRadius
-        const w = this.width;
-        const h = this.height;
-        const r = this.styles.borderRadius;
-
-        if (r > 0) {
-            ctx.beginPath();
-            ctx.moveTo(-w / 2 + r, -h / 2);
-            ctx.lineTo(w / 2 - r, -h / 2);
-            ctx.arcTo(w / 2, -h / 2, w / 2, -h / 2 + r, r);
-            ctx.lineTo(w / 2, h / 2 - r);
-            ctx.arcTo(w / 2, h / 2, w / 2 - r, h / 2, r);
-            ctx.lineTo(-w / 2 + r, h / 2);
-            ctx.arcTo(-w / 2, h / 2, -w / 2, h / 2 - r, r);
-            ctx.lineTo(-w / 2, -h / 2 + r);
-            ctx.arcTo(-w / 2, -h / 2, -w / 2 + r, -h / 2, r);
-            ctx.closePath();
-            ctx.clip();
-        }
-    }
     _applyClip (ctx) {
         if (!this.styles.clip) return;
 
@@ -1636,14 +1582,19 @@ class Entity {
     }
     _applyFilters (ctx) {
         // Apply blur
-        if (this.styles.blur > 0) {
+        if (this.styles.blur > 0)
             ctx.filter = `blur(${this.styles.blur}px)`;
-        }
 
         // Applying CSS filters
-        if (this.styles.filter) {
+        if (this.styles.filter)
             ctx.filter = this.styles.filter;
-        }
+    }
+    _applyShadow (ctx) {
+        if (!this.styles.shadowColor) return;
+        ctx.shadowColor   = this.styles.shadowColor;
+        ctx.shadowBlur    = this.styles.shadowBlur;
+        ctx.shadowOffsetX = this.styles.shadowOffsetX;
+        ctx.shadowOffsetY = this.styles.shadowOffsetY;
     }
     _applyMask (ctx) {
         if (!this.styles.mask) return;
@@ -1662,9 +1613,8 @@ class Entity {
         ctx.restore();
     }
     _renderCustomPath (ctx) {
-        if (typeof this.styles.customPath === 'function') {
+        if (typeof this.styles.customPath === 'function')
             this.styles.customPath(ctx);
-        }
     }
     _renderSprite (ctx) {
         if (!this.sprite || !this.sprite.asset) return;

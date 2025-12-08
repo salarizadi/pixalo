@@ -33,16 +33,16 @@ class Pixalo extends Utils {
             throw new Error('Invalid selector');
         }
 
-        config.worker = typeof DedicatedWorkerGlobalScope !== 'undefined';
+        config.worker        = typeof DedicatedWorkerGlobalScope !== 'undefined';
 
-        this.id       = 'main';
-        this.isPixalo = true;
-        this.isReady  = false;
-        this.isScene  = config.isScene || false;
-        this.freezed  = false;
-        this.timers   = new Map();
-        this.dataset  = new Map();
-        this.scenes   = new Map();
+        this.id              = 'main';
+        this.isPixalo        = true;
+        this.isReady         = false;
+        this.isScene         = config.isScene || false;
+        this.freezed         = false;
+        this.timers          = new Map();
+        this.dataset         = new Map();
+        this.scenes          = new Map();
         this.eventListeners  = new Map();
 
         this.#init(config, false);
@@ -55,10 +55,10 @@ class Pixalo extends Utils {
         this._createWindow(config?.window);
 
         const context = {
-            id: '2d',
-            alpha: true,
-            colorSpace: 'srgb',
-            desynchronized: true,
+            id                : '2d',
+            alpha             : true,
+            colorSpace        : 'srgb',
+            desynchronized    : true,
             willReadFrequently: false,
             ...(config?.context || {})
         };
@@ -72,27 +72,28 @@ class Pixalo extends Utils {
 
         this.config = {
             context,
-            worker : config.worker  || false,
-            width  : config.width   || (this.canvas.width || 0),
-            height : config.height  || (this.canvas.height || 0),
-            fps: config.fps || 60,
-            grid: config.grid || false,
-            quality: config.quality || this.window.devicePixelRatio,
-            physics: config.physics || {},
-            collision: config.collision || {children: false},
-            background: config.background || '#ffffff',
-            resizeTarget: config.resizeTarget || false,
-            autoResize: config.autoResize ?? true,
+            worker       : config.worker        || false,
+            width        : config.width         || (this.canvas.width || 0),
+            height       : config.height        || (this.canvas.height || 0),
+            fps          : config.fps           || 60,
+            grid         : config.grid          || false,
+            quality      : config.quality       || this.window.devicePixelRatio,
+            camera       : config.camera        || {},
+            physics      : config.physics       || {},
+            collision    : config.collision     || {children: false},
+            background   : config.background    || '#ffffff',
+            resizeTarget : config.resizeTarget  || false,
+            autoResize   : config.autoResize    ?? true,
             autoStartStop: config.autoStartStop ?? true
         };
         this.baseWidth  = this.config.width;
         this.baseHeight = this.config.height;
 
-        this.running  = false;
-        this.lastTime = 0;
+        this.running    = false;
+        this.lastTime   = 0;
 
         if (!config.isScene) {
-            this.debugger = new Debugger(this, {
+            this.debugger   = new Debugger(this, {
                 active: Boolean(config.debugger),
                 ...config.debugger || {},
                 fps: {
@@ -103,42 +104,42 @@ class Pixalo extends Utils {
             });
         }
 
-        this.entities       = new Map();
-        this.sortedEntities = {
+        this.entities           = new Map();
+        this.sortedEntities     = {
             scene   : null,
             entities: []
         };
 
-        this.assets     = new Assets(this);
-        this.background = new Background(this);
+        this.assets             = new Assets(this);
+        this.background         = new Background(this);
 
         if (!config.isScene)
-            this.camera = new Camera(this, config.camera);
+            this.camera         = new Camera(this, config.camera);
 
-        this.grid = new Grid(this, config.grid || {});
+        this.grid               = new Grid(this, config.grid || {});
 
-        this.physicsEnabled = Boolean(config.physics);
-        this.physics = new Physics(this, config.physics);
+        this.physicsEnabled     = Boolean(config.physics);
+        this.physics            = new Physics(this, config.physics);
 
-        this.collisionEnabled = Boolean(config.collision);
-        this.collision = new Collision();
+        this.collisionEnabled   = Boolean(config.collision);
+        this.collision          = new Collision();
 
         if (!config.isScene)
-            this.tileMap = new TileMap(this);
+            this.tileMap        = new TileMap(this);
 
-        this.emitters = new Emitters(this);
-        this.audio    = new AudioManager(this.config.worker);
+        this.emitters           = new Emitters(this);
+        this.audio              = new AudioManager(this.config.worker);
 
-        this.animations   = {};
-        this.deltaTime    = 0;
-        this.maxDeltaTime = Math.max(1000 / this.config.fps, 16.67);
+        this.animations         = {};
+        this.deltaTime          = 0;
+        this.maxDeltaTime       = Math.max(1000 / this.config.fps, 16.67);
 
         this._applyCanvasConfig();
 
-        this.draggedEntity   = null;
-        this.draggedEntities = new Map();
-        this.hoveredEntity   = null;
-        this.mouseDownEntity = null;
+        this.draggedEntity      = null;
+        this.draggedEntities    = new Map();
+        this.hoveredEntity      = null;
+        this.mouseDownEntity    = null;
         this.touchStartEntities = new Map();
         this._setupEventListeners();
 
@@ -779,9 +780,6 @@ class Pixalo extends Utils {
 
         if (options.audio)
             this.audio.cleanup();
-
-        if (!this.isScene)
-            this.camera.reset();
 
         this.background.clear();
         this.emitters.clear();
