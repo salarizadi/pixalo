@@ -7,7 +7,7 @@
  *    - Salar Izadi
  *    - https://github.com/salarizadi
  */
-import {Workers} from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
+import { Workers } from 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/dist/pixalo.esm.js';
 
 Workers.register('#canvas', 'https://cdn.jsdelivr.net/gh/pixalo/pixalo@master/examples/scenes/worker/game.js', {
     /**

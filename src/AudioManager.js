@@ -1,19 +1,27 @@
 /**
- * Copyright (c) 2025 Pixalo
+ * Copyright (c) 2025-2026 Pixalo
  * @Repository: https://github.com/pixalo
  * @License: MIT
  */
+
 class AudioManager {
 
     constructor (worker_id) {
-        this.assets         = new Map();
-        this.workerID       = worker_id;
-        this.isWorker       = typeof importScripts !== 'undefined' && typeof DedicatedWorkerGlobalScope !== 'undefined';
-        this.instances      = new Map();
-        this.assetInstances = new Map(); // Track instances by asset ID for faster lookup
-        this.listener       = null;
-        this.masterVolume   = 1;
-        this.nextInstanceId = 0;
+        this.assets          = new Map();
+        this.workerID        = worker_id;
+        this.isWorker        = typeof importScripts !== 'undefined' && typeof DedicatedWorkerGlobalScope !== 'undefined';
+        this.instances       = new Map();
+        this.assetInstances  = new Map();
+        this.listener        = null;
+        this.masterVolume    = 1;
+        this.nextInstanceId  = 0;
+        this.isGloballyMuted = false;
+
+        this.pendingRequests = new Map();
+        this.nextRequestId   = 0;
+        this.eventListeners  = new Map();
+
+        this._handleWorker = this._handleWorker.bind(this);
 
         if (!this.isWorker) {
             try {
@@ -21,22 +29,55 @@ class AudioManager {
                 this.listener = this.context.listener;
                 this._initSpatialAudio();
             } catch (e) {
-                this.error(e)
+                this.error(e);
             }
         }
     }
 
-    async load (id, src, config) {
+    async load (id, src, config = {}) {
+        config.timeout = config.timeout || 60000;
+
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_load', args: [id, src, config]});
-            return;
+            // An extra second to ensure the response returns to the worker
+            const workerRequestTimeout = config.timeout + 1000;
+            return this._sendWorkerRequest({
+                action: 'audio_load',
+                args  : [id, src, config]
+            }, workerRequestTimeout);
         }
 
         return new Promise(async (resolve, reject) => {
             try {
-                const response = await fetch(src, {
-                    mode: 'cors', ...(config.fetch || {})
-                });
+                const controller = new AbortController();
+                let timeoutId;
+
+                if (config?.timeout && config.timeout > 0) {
+                    timeoutId = setTimeout(() => {
+                        controller.abort(new Error(`"${id}": Request timed out (${config.timeout}ms)`));
+                    }, config.timeout);
+                }
+
+                const fetchOptions = {
+                    mode: 'cors',
+                    ...(config?.fetch || {})
+                };
+
+                // If the user gives a signal, link it to the controller.
+                if (config?.fetch?.signal) {
+                    const userSignal = config.fetch.signal;
+                    userSignal.addEventListener('abort', () => {
+                        controller.abort(userSignal.reason);
+                    });
+                }
+
+                // Always use our signal (not the user's signal)
+                fetchOptions.signal = controller.signal;
+
+                const response = await fetch(src, fetchOptions);
+
+                if (timeoutId)
+                    clearTimeout(timeoutId);
+
                 const arrayBuffer = await response.arrayBuffer();
                 const audioBuffer = await this.context.decodeAudioData(arrayBuffer);
 
@@ -45,42 +86,166 @@ class AudioManager {
                     asset: audioBuffer,
                     config: {
                         ...config,
-                        volume: config.volume || 1,
-                        loop: config.loop || false,
-                        autoplay: config.autoplay || false,
-                        muted: config.muted || false
+                        volume: config?.volume || 1,
+                        loop: config?.loop || false,
+                        autoplay: config?.autoplay || false,
+                        muted: config?.muted || false,
+                        allowMultiple: config?.allowMultiple !== false
                     }
                 };
 
                 this.assets.set(id, assetObject);
 
-                if (this.isWorker)
-                    this._sendWorker({...assetObject, asset: null, type: 'pixalo_audio_loaded'});
-                else if (this?.worker)
-                    this.worker.postMessage({...assetObject, asset: null, type: 'pixalo_audio_loaded'});
+                this.trigger('load', {assetId: id, config: assetObject.config});
 
-                resolve({asset: audioBuffer, config: assetObject.config});
+                resolve({
+                    assetId: id,
+                    duration: audioBuffer.duration,
+                    numberOfChannels: audioBuffer.numberOfChannels,
+                    sampleRate: audioBuffer.sampleRate,
+                    config: assetObject.config
+                });
             } catch (e) {
-                reject(new Error(`Failed to load audio: ${e.message}`));
+                if (e.name === 'AbortError') {
+                    reject(new Error(`"${id}": Request timed out (${config.timeout}ms)`));
+                } else {
+                    reject(new Error(`"${id}": ${e.message}`));
+                }
             }
         });
     }
 
+    /** ======== EVENTS ======== */
+    on (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.on(e, callback, config));
+            return this;
+        }
+        if (typeof eventName === 'object') {
+            for (const k in eventName) this.on(k, eventName[k], config);
+            return this;
+        }
+
+        if (!this.eventListeners.has(eventName))
+            this.eventListeners.set(eventName, new Set());
+
+        this.eventListeners.get(eventName).add({cb: callback, cfg: config});
+        return this;
+    }
+    one (eventName, callback, config = {}) {
+        config = {removeable: true, ...config};
+
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.one(e, callback, config));
+            return this;
+        }
+        if (typeof eventName === 'object') {
+            for (const k in eventName) this.one(k, eventName[k], config);
+            return this;
+        }
+
+        const onceWrapper = (...args) => {
+            callback.apply(this, args);
+            this.off(eventName, onceWrapper);
+        };
+
+        this.on(eventName, onceWrapper, config);
+        return this;
+    }
+    trigger (eventName, ...args) {
+        if (this.isWorker) {
+            if (Array.isArray(eventName)) {
+                eventName.forEach(e => this.trigger(e, ...args));
+                return this;
+            }
+
+            const set = this.eventListeners.get(eventName);
+            if (set) {
+                Array.from(set).forEach(({cb}) => cb.apply(this, args));
+            }
+            return this;
+        }
+
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.trigger(e, ...args));
+            return this;
+        }
+
+        const set = this.eventListeners.get(eventName);
+        if (set) {
+            Array.from(set).forEach(({cb}) => cb.apply(this, args));
+        }
+
+        if (this.worker) {
+            this.worker.postMessage({
+                wid: this.workerID,
+                action: 'audio_trigger',
+                args: [eventName, ...args]
+            });
+        }
+
+        return this;
+    }
+    off (eventName, callback) {
+        if (Array.isArray(eventName)) {
+            eventName.forEach(e => this.off(e, callback));
+            return this;
+        }
+
+        const set = this.eventListeners.get(eventName);
+        if (!set) return this;
+
+        if (callback) {
+            for (const item of set) {
+                if (item.cb === callback) {
+                    set.delete(item);
+                    break;
+                }
+            }
+        } else {
+            set.clear();
+        }
+        return this;
+    }
+    clearEvents () {
+        for (const [eventName, set] of this.eventListeners.entries()) {
+            for (const item of [...set])
+                if (item.cfg?.removeable !== false) set.delete(item);
+            if (set.size === 0) this.eventListeners.delete(eventName);
+        }
+    }
+    /** ======== END ======== */
+
     /** ======== CONTROLS ======== */
     async play (id, options = {}) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_play', args: [id, options]});
-            return;
+            return this._sendWorkerRequest({action: 'audio_play', args: [id, options]});
+        }
+
+        const assetObject = this.assets.get(id);
+        if (!assetObject) {
+            return Promise.reject(new Error(`Audio asset with id '${id}' not found`));
+        }
+
+        const allowMultiple = options.allowMultiple !== undefined
+            ? options.allowMultiple
+            : (assetObject.config.allowMultiple !== false);
+
+        const existingInstances = this.assetInstances.get(id);
+
+        if (!allowMultiple && existingInstances && existingInstances.size > 0) {
+            this.warn(`Asset '${id}' is already playing. Use allowMultiple:true or stop() first.`);
+            return Promise.resolve({
+                assetId: id,
+                ignored: true,
+                reason: 'already_playing'
+            });
         }
 
         return new Promise((resolve, reject) => {
             try {
-                const assetObject = this.assets.get(id);
-                if (!assetObject) {
-                    reject(new Error(`Audio asset with id '${id}' not found`));
-                    return;
-                }
-
                 if (this.context.state === 'suspended') {
                     this.context.resume();
                 }
@@ -91,8 +256,11 @@ class AudioManager {
 
                 source.buffer = assetObject.asset;
                 const config = {...assetObject.config, ...options};
-                gainNode.gain.value = config.muted ? 0 : (config.volume * this.masterVolume);
-                source.loop = config.loop;
+
+                const shouldBeMuted = config.muted || this.isGloballyMuted;
+                gainNode.gain.value = shouldBeMuted ? 0 : (config.volume * this.masterVolume);
+
+                source.loop = false;
 
                 const spatialNodes = this._setupAudioChain(source, gainNode, config.spatial);
 
@@ -113,25 +281,22 @@ class AudioManager {
 
                 this.instances.set(instanceId, instanceData);
 
-                // Track instance by asset ID for faster lookup
                 if (!this.assetInstances.has(id)) {
                     this.assetInstances.set(id, new Set());
                 }
                 this.assetInstances.get(id).add(instanceId);
 
-                source.onended = () => {
-                    this.instances.delete(instanceId);
-                    if (this.assetInstances.has(id)) {
-                        this.assetInstances.get(id).delete(instanceId);
-                        if (this.assetInstances.get(id).size === 0) {
-                            this.assetInstances.delete(id);
-                        }
-                    }
-                };
+                this._bindOnEnded(source, instanceId, instanceData);
 
                 source.start(0);
 
-                resolve({instanceId, assetId: id, source, gainNode, spatialNodes});
+                this.trigger('play', {instanceId, assetId: id});
+
+                resolve({
+                    instanceId,
+                    assetId: id,
+                    duration: assetObject.asset.duration
+                });
 
             } catch (e) {
                 this.error(`Failed to play audio '${id}':`, e.message);
@@ -141,26 +306,13 @@ class AudioManager {
     }
     pause (id) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_pause', args: [id]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_pause', args: [id]});
         }
 
-        // Check if it's an instanceId first
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId and pause the first active instance
-        if (!instance) {
-            for (const [instanceId, instanceData] of this.instances) {
-                if (instanceData.assetId === id && instanceData.isPlaying && !instanceData.isPaused) {
-                    instance = instanceData;
-                    id = instanceId; // Update id to instanceId for further processing
-                    break;
-                }
-            }
-        }
-
         if (instance && instance.isPlaying && !instance.isPaused) {
-            const currentTime = this.getCurrentTime(id);
+            const currentTime = this._getCurrentTimeSync(id);
 
             instance.pauseTime = currentTime;
             instance.isPlaying = false;
@@ -172,105 +324,110 @@ class AudioManager {
             } catch (e) {
                 this.warn('Source already stopped:', e.message);
             }
-        } else {
-            this.warn(`No active audio instance found for id '${id}' or already paused`);
+
+            this.trigger('pause', {instanceId: id, assetId: instance.assetId, currentTime});
+            return Promise.resolve(true);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds && assetInstanceIds.size > 0) {
+            Array.from(assetInstanceIds).forEach(instanceId => {
+                const inst = this.instances.get(instanceId);
+                if (inst && inst.isPlaying && !inst.isPaused) {
+                    const currentTime = this._getCurrentTimeSync(instanceId);
+
+                    inst.pauseTime = currentTime;
+                    inst.isPlaying = false;
+                    inst.isPaused = true;
+
+                    try {
+                        inst.source.onended = null;
+                        inst.source.stop();
+                    } catch (e) {
+                        this.warn('Source already stopped:', e.message);
+                    }
+
+                    this.trigger('pause', {instanceId, assetId: id, currentTime});
+                }
+            });
+            return Promise.resolve(true);
+        }
+
+        this.warn(`No active audio instance found for id '${id}' or already paused`);
+        return Promise.resolve(true);
     }
     resume (id) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_resume', args: [id]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_resume', args: [id]});
         }
 
         let instance = this.instances.get(id);
         let instanceId = id;
 
-        if (!instance) {
-            const assetInstanceIds = this.assetInstances.get(id);
-            if (assetInstanceIds) {
-                for (const iId of assetInstanceIds) {
-                    const instanceData = this.instances.get(iId);
-                    if (instanceData && instanceData.isPaused) {
-                        instance = instanceData;
-                        instanceId = iId;
-                        break;
-                    }
-                }
-            }
-        }
-
         if (instance && instance.isPaused) {
-            const assetObject = this.assets.get(instance.assetId);
-            if (!assetObject) {
-                this.warn(`Asset not found for instance '${instanceId}'`);
-                return this;
-            }
-
-            if (this.context.state === 'suspended')
-                this.context.resume();
-
-            const source = this.context.createBufferSource();
-            const gainNode = this.context.createGain();
-
-            source.buffer = assetObject.asset;
-            source.loop = instance.config.loop;
-            gainNode.gain.value = instance.config.volume * this.masterVolume;
-
-            const spatialNodes = this._setupAudioChain(source, gainNode, instance.spatialConfig);
-
-            instance.source = source;
-            instance.gainNode = gainNode;
-            instance.spatialNodes = spatialNodes;
-            instance.startTime = this.context.currentTime - instance.pauseTime;
-            instance.isPlaying = true;
-            instance.isPaused = false;
-
-            source.onended = () => {
-                this.instances.delete(instanceId);
-                if (this.assetInstances.has(instance.assetId)) {
-                    this.assetInstances.get(instance.assetId).delete(instanceId);
-                    if (this.assetInstances.get(instance.assetId).size === 0) {
-                        this.assetInstances.delete(instance.assetId);
-                    }
-                }
-            };
-
-            const remainingDuration = assetObject.asset.duration - instance.pauseTime;
-            if (remainingDuration > 0) {
-                source.start(0, instance.pauseTime);
-            } else {
-                source.start(0, 0);
-            }
-        } else {
-            this.warn(`No paused audio instance found for id '${id}'`);
+            return this._resumeInstance(instanceId, instance);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds) {
+            for (const iId of assetInstanceIds) {
+                const instanceData = this.instances.get(iId);
+                if (instanceData && instanceData.isPaused) {
+                    return this._resumeInstance(iId, instanceData);
+                }
+            }
+        }
+
+        this.warn(`No paused audio instance found for id '${id}'`);
+        return Promise.resolve(true);
+    }
+    _resumeInstance (instanceId, instance) {
+        const assetObject = this.assets.get(instance.assetId);
+        if (!assetObject) {
+            this.warn(`Asset not found for instance '${instanceId}'`);
+            return Promise.resolve(true);
+        }
+
+        if (this.context.state === 'suspended')
+            this.context.resume();
+
+        const source   = this.context.createBufferSource();
+        const gainNode = this.context.createGain();
+
+        source.buffer = assetObject.asset;
+        source.loop   = false;
+
+        const shouldBeMuted = instance.config.muted || this.isGloballyMuted;
+        gainNode.gain.value = shouldBeMuted ? 0 : (instance.config.volume * this.masterVolume);
+
+        const spatialNodes  = this._setupAudioChain(source, gainNode, instance.spatialConfig);
+
+        instance.source       = source;
+        instance.gainNode     = gainNode;
+        instance.spatialNodes = spatialNodes;
+        instance.startTime    = this.context.currentTime - instance.pauseTime;
+        instance.isPlaying    = true;
+        instance.isPaused     = false;
+
+        this._bindOnEnded(source, instanceId, instance);
+
+        const remainingDuration = assetObject.asset.duration - instance.pauseTime;
+        if (remainingDuration > 0) {
+            source.start(0, instance.pauseTime);
+        } else {
+            source.start(0, 0);
+        }
+
+        this.trigger('resume', {instanceId, assetId: instance.assetId, currentTime: instance.pauseTime});
+        return Promise.resolve(true);
     }
     stop (id) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_stop', args: [id]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_stop', args: [id]});
         }
 
-        // Check if it's an instanceId first
         let instance = this.instances.get(id);
-        let instanceId = id;
 
-        // If not found, check if it's an assetId and stop the first active instance
-        if (!instance) {
-            for (const [iId, instanceData] of this.instances) {
-                if (instanceData.assetId === id) {
-                    instance = instanceData;
-                    instanceId = iId;
-                    break;
-                }
-            }
-        }
-
-        instance = this.instances.get(instanceId);
         if (instance) {
             try {
                 instance.source.onended = null;
@@ -278,21 +435,42 @@ class AudioManager {
             } catch (e) {
                 this.warn('Error stopping source:', e.message);
             }
-            this.instances.delete(instanceId);
+            this.instances.delete(id);
             if (this.assetInstances.has(instance.assetId)) {
-                this.assetInstances.get(instance.assetId).delete(instanceId);
+                this.assetInstances.get(instance.assetId).delete(id);
                 if (this.assetInstances.get(instance.assetId).size === 0) {
                     this.assetInstances.delete(instance.assetId);
                 }
             }
+
+            this.trigger('stop', {instanceId: id, assetId: instance.assetId});
+            return Promise.resolve(true);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds && assetInstanceIds.size > 0) {
+            Array.from(assetInstanceIds).forEach(instanceId => {
+                const inst = this.instances.get(instanceId);
+                if (inst) {
+                    try {
+                        inst.source.onended = null;
+                        inst.source.stop();
+                    } catch (e) {
+                        this.warn('Error stopping source:', e.message);
+                    }
+                    this.instances.delete(instanceId);
+                }
+            });
+            this.assetInstances.delete(id);
+            this.trigger('stop', {assetId: id, allInstances: true});
+            return Promise.resolve(true);
+        }
+
+        return Promise.resolve(true);
     }
     stopAsset (assetId) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_stopAsset', args: [assetId]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_stopAsset', args: [assetId]});
         }
 
         const assetInstanceIds = this.assetInstances.get(assetId);
@@ -301,47 +479,181 @@ class AudioManager {
             instancesToStop.forEach(instanceId => this.stop(instanceId));
         }
 
-        return this;
+        return Promise.resolve(true);
+    }
+    loop (id, loop) {
+        if (this.isWorker) {
+            if (loop === undefined) {
+                return this._sendWorkerRequest({action: 'audio_loop', args: [id]});
+            }
+            return this._sendWorkerRequest({action: 'audio_loop', args: [id, loop]});
+        }
+
+        if (loop === undefined) {
+            let instance = this.instances.get(id);
+
+            if (instance)
+                return Promise.resolve(instance.config.loop);
+
+            const assetInstanceIds = this.assetInstances.get(id);
+            if (assetInstanceIds) {
+                for (const iId of assetInstanceIds) {
+                    const inst = this.instances.get(iId);
+                    if (inst) return Promise.resolve(inst.config.loop);
+                }
+            }
+
+            const assetObject = this.assets.get(id);
+            return Promise.resolve(assetObject ? assetObject.config.loop : false);
+        }
+
+        const loopValue = Boolean(loop);
+
+        let instance = this.instances.get(id);
+        if (instance) {
+            instance.config.loop = loopValue;
+            this.trigger('loopchange', {instanceId: id, assetId: instance.assetId, loop: loopValue});
+        } else {
+            const assetInstanceIds = this.assetInstances.get(id);
+            if (assetInstanceIds) {
+                assetInstanceIds.forEach(iId => {
+                    const inst = this.instances.get(iId);
+                    if (inst) {
+                        inst.config.loop = loopValue;
+                        this.trigger('loopchange', {instanceId: iId, assetId: id, loop: loopValue});
+                    }
+                });
+            }
+        }
+
+        const assetObject = this.assets.get(id);
+        if (assetObject) {
+            assetObject.config.loop = loopValue;
+            if (!instance && !this.assetInstances.has(id)) {
+                this.trigger('loopchange', {assetId: id, loop: loopValue});
+            }
+        }
+
+        return Promise.resolve(true);
+    }
+    seek (id, time) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_seek', args: [id, time]});
+        }
+
+        let instance = this.instances.get(id);
+
+        if (instance) {
+            return this._seekInstance(id, instance, time);
+        }
+
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds && assetInstanceIds.size > 0) {
+            Array.from(assetInstanceIds).forEach(instanceId => {
+                const inst = this.instances.get(instanceId);
+                if (inst) {
+                    this._seekInstance(instanceId, inst, time);
+                }
+            });
+            return Promise.resolve(true);
+        }
+
+        this.warn(`No audio instance found for id '${id}'`);
+        return Promise.resolve(true);
+    }
+    _seekInstance (instanceId, instance, time) {
+        const assetObject = this.assets.get(instance.assetId);
+        if (!assetObject) {
+            this.warn(`Asset not found for instance '${instanceId}'`);
+            return Promise.resolve(true);
+        }
+
+        const duration = assetObject.asset.duration;
+        const seekTime = Math.max(0, Math.min(duration, time));
+
+        try {
+            instance.source.onended = null;
+            instance.source.stop();
+        } catch (e) {
+            this.warn('Error stopping source for seek:', e.message);
+        }
+
+        const source   = this.context.createBufferSource();
+        const gainNode = this.context.createGain();
+
+        source.buffer = assetObject.asset;
+        source.loop   = false;
+
+        const shouldBeMuted = instance.config.muted || this.isGloballyMuted;
+        gainNode.gain.value = shouldBeMuted ? 0 : (instance.config.volume * this.masterVolume);
+
+        const spatialNodes  = this._setupAudioChain(source, gainNode, instance.spatialConfig);
+
+        instance.source       = source;
+        instance.gainNode     = gainNode;
+        instance.spatialNodes = spatialNodes;
+        instance.startTime    = this.context.currentTime - seekTime;
+        instance.isPlaying    = true;
+        instance.isPaused     = false;
+
+        this._bindOnEnded(source, instanceId, instance);
+
+        source.start(0, seekTime);
+
+        this.trigger('seek', {instanceId, assetId: instance.assetId, seekTime});
+        return Promise.resolve(true);
     }
     /** ======== END ======== */
 
     /** ======== VOLUME ======== */
     setVolume (id, volume) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setVolume', args: [id, volume]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setVolume', args: [id, volume]});
         }
 
-        // Check if it's an instanceId first
         let instance = this.instances.get(id);
 
         if (instance) {
-            // It's an instanceId
-            instance.gainNode.gain.value = volume * this.masterVolume;
             instance.config.volume = volume;
-        } else {
-            // Check if it's an assetId and set volume for the first instance
-            for (const instanceData of this.instances.values()) {
-                if (instanceData.assetId === id) {
-                    instanceData.gainNode.gain.value = volume * this.masterVolume;
-                    instanceData.config.volume = volume;
-                    break;
-                }
-            }
+            instance.gainNode.gain.value = (instance.config.muted || this.isGloballyMuted)
+                ? 0
+                : (volume * this.masterVolume);
+
+            this.trigger('volumechange', {instanceId: id, assetId: instance.assetId, volume});
+            return Promise.resolve(true);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds) {
+            assetInstanceIds.forEach(iId => {
+                const inst = this.instances.get(iId);
+                if (inst) {
+                    inst.config.volume = volume;
+                    inst.gainNode.gain.value = (inst.config.muted || this.isGloballyMuted)
+                        ? 0
+                        : (volume * this.masterVolume);
+
+                    this.trigger('volumechange', {instanceId: iId, assetId: id, volume});
+                }
+            });
+            return Promise.resolve(true);
+        }
+
+        return Promise.resolve(true);
     }
     setAssetVolume (assetId, volume) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setAssetVolume', args: [assetId, volume]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setAssetVolume', args: [assetId, volume]});
         }
 
         this.instances.forEach((instance) => {
             if (instance.assetId === assetId) {
-                instance.gainNode.gain.value = volume * this.masterVolume;
                 instance.config.volume = volume;
+                instance.gainNode.gain.value = (instance.config.muted || this.isGloballyMuted)
+                    ? 0
+                    : (volume * this.masterVolume);
+
+                this.trigger('volumechange', {instanceId: instance.instanceId, assetId, volume});
             }
         });
 
@@ -350,31 +662,31 @@ class AudioManager {
             assetObject.config.volume = volume;
         }
 
-        return this;
+        return Promise.resolve(true);
     }
     setMasterVolume (volume) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setMasterVolume', args: [volume]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setMasterVolume', args: [volume]});
         }
 
         this.masterVolume = Math.max(0, Math.min(1, volume));
 
         this.instances.forEach((instance) => {
-            if (!instance.config.muted) {
+            if (!instance.config.muted && !this.isGloballyMuted) {
                 instance.gainNode.gain.value = instance.config.volume * this.masterVolume;
             }
         });
 
-        return this;
+        this.trigger('volumechange', {type: 'master', volume});
+
+        return Promise.resolve(true);
     }
     /** ======== END ======== */
 
     /** ======== SPATIAL ======== */
     setListenerPosition (x, y, z = 0) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setListenerPosition', args: [x, y, z]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setListenerPosition', args: [x, y, z]});
         }
 
         if (this.listener.positionX) {
@@ -385,15 +697,14 @@ class AudioManager {
             this.listener.setPosition(x, y, z);
         }
 
-        return this;
+        return Promise.resolve(true);
     }
     setListenerOrientation (forwardX, forwardY, forwardZ = 0, upX = 0, upY = 1, upZ = 0) {
         if (this.isWorker) {
-            this._sendWorker({
+            return this._sendWorkerRequest({
                 action: 'audio_setListenerOrientation',
                 args: [forwardX, forwardY, forwardZ, upX, upY, upZ]
             });
-            return this;
         }
 
         if (this.listener.forwardX) {
@@ -407,73 +718,59 @@ class AudioManager {
             this.listener.setOrientation(forwardX, forwardY, forwardZ, upX, upY, upZ);
         }
 
-        return this;
+        return Promise.resolve(true);
     }
     setSpatialPosition (id, x, y, z = 0) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setSpatialPosition', args: [id, x, y, z]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setSpatialPosition', args: [id, x, y, z]});
         }
 
-        // Check if it's an instanceId first
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId and update the first spatial instance
-        if (!instance) {
-            for (const instanceData of this.instances.values()) {
-                if (instanceData.assetId === id && instanceData.spatialNodes && instanceData.spatialNodes.panner) {
-                    instance = instanceData;
-                    break;
-                }
-            }
-        }
-
         if (instance && instance.spatialNodes && instance.spatialNodes.panner) {
-            if (instance.spatialNodes.panner.positionX) {
-                instance.spatialNodes.panner.positionX.value = x;
-                instance.spatialNodes.panner.positionY.value = y;
-                instance.spatialNodes.panner.positionZ.value = z;
-            } else {
-                instance.spatialNodes.panner.setPosition(x, y, z);
-            }
-        } else {
-            this.warn(`No spatial audio found for id '${id}'`);
+            this._setPannerPosition(instance.spatialNodes.panner, x, y, z);
+            return Promise.resolve(true);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds) {
+            assetInstanceIds.forEach(iId => {
+                const inst = this.instances.get(iId);
+                if (inst && inst.spatialNodes && inst.spatialNodes.panner) {
+                    this._setPannerPosition(inst.spatialNodes.panner, x, y, z);
+                }
+            });
+            return Promise.resolve(true);
+        }
+
+        this.warn(`No spatial audio found for id '${id}'`);
+        return Promise.resolve(true);
     }
     setSpatialOrientation (id, x, y, z = 0) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_setSpatialOrientation', args: [id, x, y, z]});
-            return this;
+            return this._sendWorkerRequest({action: 'audio_setSpatialOrientation', args: [id, x, y, z]});
         }
 
-        // Check if it's an instanceId first
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId and update the first spatial instance
-        if (!instance) {
-            for (const instanceData of this.instances.values()) {
-                if (instanceData.assetId === id && instanceData.spatialNodes && instanceData.spatialNodes.panner) {
-                    instance = instanceData;
-                    break;
-                }
-            }
-        }
-
         if (instance && instance.spatialNodes && instance.spatialNodes.panner) {
-            if (instance.spatialNodes.panner.orientationX) {
-                instance.spatialNodes.panner.orientationX.value = x;
-                instance.spatialNodes.panner.orientationY.value = y;
-                instance.spatialNodes.panner.orientationZ.value = z;
-            } else {
-                instance.spatialNodes.panner.setOrientation(x, y, z);
-            }
-        } else {
-            this.warn(`No spatial audio found for id '${id}'`);
+            this._setPannerOrientation(instance.spatialNodes.panner, x, y, z);
+            return Promise.resolve(true);
         }
 
-        return this;
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds) {
+            assetInstanceIds.forEach(iId => {
+                const inst = this.instances.get(iId);
+                if (inst && inst.spatialNodes && inst.spatialNodes.panner) {
+                    this._setPannerOrientation(inst.spatialNodes.panner, x, y, z);
+                }
+            });
+            return Promise.resolve(true);
+        }
+
+        this.warn(`No spatial audio found for id '${id}'`);
+        return Promise.resolve(true);
     }
     playSpatial (assetId, x, y, z = 0, options = {}) {
         const spatialOptions = {
@@ -500,36 +797,89 @@ class AudioManager {
         if (config.volume !== undefined)
             this.setVolume(id, config.volume);
 
-        return this;
+        return Promise.resolve(true);
     }
     /** ======== END ======== */
 
     /** ======== STATUS ======== */
-    isPlaying (id) {
+    exists (id) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_isPlaying', args: [id]});
-            return false;
+            return this._sendWorkerRequest({action: 'audio_exists', args: [id]});
         }
 
-        // Check if it's an instanceId first
+        if (this.instances.has(id)) return Promise.resolve(true);
+
+        const assetInstanceIds = this.assetInstances.get(id);
+        return Promise.resolve(assetInstanceIds ? assetInstanceIds.size > 0 : false);
+    }
+    isPlaying (id) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_isPlaying', args: [id]});
+        }
+
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId
         if (!instance) {
             for (const instanceData of this.instances.values()) {
                 if (instanceData.assetId === id && instanceData.isPlaying) {
-                    return true;
+                    return Promise.resolve(true);
                 }
             }
-            return false;
+            return Promise.resolve(false);
         }
 
-        return instance ? instance.isPlaying : false;
+        return Promise.resolve(instance ? instance.isPlaying : false);
+    }
+    isPaused (id) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_isPaused', args: [id]});
+        }
+
+        let instance = this.instances.get(id);
+
+        if (!instance) {
+            for (const instanceData of this.instances.values()) {
+                if (instanceData.assetId === id && instanceData.isPaused) {
+                    return Promise.resolve(true);
+                }
+            }
+            return Promise.resolve(false);
+        }
+
+        return Promise.resolve(instance ? instance.isPaused : false);
+    }
+    isMuted (id) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_isMuted', args: id !== undefined ? [id] : []});
+        }
+
+        if (id === undefined) {
+            return Promise.resolve(this.isGloballyMuted);
+        }
+
+        let instance = this.instances.get(id);
+        if (instance) {
+            return Promise.resolve(instance.config.muted || this.isGloballyMuted);
+        }
+
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds) {
+            for (const iId of assetInstanceIds) {
+                const inst = this.instances.get(iId);
+                if (inst) return Promise.resolve(inst.config.muted || this.isGloballyMuted);
+            }
+        }
+
+        const assetObject = this.assets.get(id);
+        if (assetObject) {
+            return Promise.resolve(assetObject.config.muted || this.isGloballyMuted);
+        }
+
+        return Promise.resolve(false);
     }
     getAssetInstances (assetId) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_getAssetInstances', args: [assetId]});
-            return [];
+            return this._sendWorkerRequest({action: 'audio_getAssetInstances', args: [assetId]});
         }
 
         const instances = [];
@@ -542,32 +892,375 @@ class AudioManager {
                         instanceId,
                         isPlaying: instance.isPlaying,
                         isPaused: instance.isPaused,
-                        currentTime: this.getCurrentTime(instanceId)
+                        currentTime: this._getCurrentTimeSync(instanceId)
                     });
                 }
             }
         }
-        return instances;
+        return Promise.resolve(instances);
     }
     getDuration (assetId) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_getDuration', args: [assetId]});
-            return 0;
+            return this._sendWorkerRequest({action: 'audio_getDuration', args: [assetId]});
         }
 
         const assetObject = this.assets.get(assetId);
-        return assetObject ? assetObject.asset.duration : 0;
+        return Promise.resolve(assetObject ? assetObject.asset.duration : 0);
     }
     getCurrentTime (id) {
         if (this.isWorker) {
-            this._sendWorker({action: 'audio_getCurrentTime', args: [id]});
-            return 0;
+            return this._sendWorkerRequest({action: 'audio_getCurrentTime', args: [id]});
         }
 
-        // Check if it's an instanceId first
+        return Promise.resolve(this._getCurrentTimeSync(id));
+    }
+    getDistance (id) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_getDistance', args: [id]});
+        }
+
+        return Promise.resolve(this.getDistanceSync(id));
+    }
+    /** ======== END ======== */
+
+    /** ======== BATCH OPERATION ======== */
+    muteAll () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_muteAll', args: []});
+        }
+
+        this.isGloballyMuted = true;
+        this.instances.forEach((instance) => {
+            instance.gainNode.gain.value = 0;
+        });
+
+        this.trigger('mute', {type: 'global'});
+
+        return Promise.resolve(true);
+    }
+    unmuteAll () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_unmuteAll', args: []});
+        }
+
+        this.isGloballyMuted = false;
+        this.instances.forEach((instance) => {
+            if (!instance.config.muted) {
+                instance.gainNode.gain.value = instance.config.volume * this.masterVolume;
+            }
+        });
+
+        this.trigger('unmute', {type: 'global'});
+
+        return Promise.resolve(true);
+    }
+    pauseAll () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_pauseAll', args: []});
+        }
+
+        const activeInstances = Array.from(this.instances.keys()).filter(instanceId => {
+            const instance = this.instances.get(instanceId);
+            return instance.isPlaying && !instance.isPaused;
+        });
+        activeInstances.forEach(instanceId => this.pause(instanceId));
+
+        return Promise.resolve(true);
+    }
+    resumeAll () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_resumeAll', args: []});
+        }
+
+        const pausedInstances = Array.from(this.instances.keys()).filter(instanceId => {
+            const instance = this.instances.get(instanceId);
+            return instance.isPaused;
+        });
+        pausedInstances.forEach(instanceId => this.resume(instanceId));
+
+        return Promise.resolve(true);
+    }
+    stopAll () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_stopAll', args: []});
+        }
+
+        this.instances.forEach((instance) => {
+            try {
+                instance.source.stop();
+            } catch (e) {
+                // Source might already be stopped
+            }
+        });
+
+        this.instances.clear();
+        this.assetInstances.clear();
+
+        return Promise.resolve(true);
+    }
+    /** ======== END ======== */
+
+    /** ======== CLEANER ======== */
+    delete (id) {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({ action: 'audio_delete', args: [id] });
+        }
+
+        let instance = this.instances.get(id);
+        if (instance) {
+            try { instance.source.stop() } catch {}
+            this.instances.delete(id);
+            if (this.assetInstances.has(instance.assetId)) {
+                this.assetInstances.get(instance.assetId).delete(id);
+                if (this.assetInstances.get(instance.assetId).size === 0)
+                    this.assetInstances.delete(instance.assetId);
+            }
+            return Promise.resolve(true);
+        }
+
+        const assetInstanceIds = this.assetInstances.get(id);
+        if (assetInstanceIds)
+            Array.from(assetInstanceIds).forEach(iId => this.delete(iId));
+
+        this.assets.delete(id);
+        return Promise.resolve(true);
+    }
+    cleanup () {
+        if (this.isWorker) {
+            return this._sendWorkerRequest({action: 'audio_cleanup', args: []});
+        }
+
+        this.stopAll();
+        this.assets.clear();
+
+        if (this.context && this.context.state !== 'closed')
+            this.context.close();
+
+        this.instances.clear();
+        this.listener = null;
+        this.masterVolume = 1;
+        this.nextInstanceId = 0;
+        this.isGloballyMuted = false;
+        this.eventListeners.clear();
+
+        return Promise.resolve(true);
+    }
+    /** ======== END ======== */
+
+    /** ======== LOGS ======== */
+    warn (...args) {
+        console.warn('%c[AudioManager WARN]', 'color: #ff9800;', ...args);
+        return this;
+    }
+    error (...args) {
+        console.error('%c[AudioManager ERROR]', 'color: #f44336;', ...args);
+        return this;
+    }
+    /** ======== END ======== */
+
+    /** ======== PRIVATE METHODS ======== */
+    _bindOnEnded (source, instanceId, instance) {
+        source.onended = () => {
+            try { source.disconnect(); } catch(e) {}
+
+            this.instances.delete(instanceId);
+            if (this.assetInstances.has(instance.assetId)) {
+                this.assetInstances.get(instance.assetId).delete(instanceId);
+                if (this.assetInstances.get(instance.assetId).size === 0) {
+                    this.assetInstances.delete(instance.assetId);
+                }
+            }
+
+            this.trigger('ended', {instanceId, assetId: instance.assetId});
+
+            if (instance.config.loop) {
+                this.trigger('looped', {instanceId, assetId: instance.assetId});
+                this.play(instance.assetId, instance.config).catch(err => {
+                    this.warn('Loop play failed:', err.message);
+                });
+            }
+        };
+    }
+    _handleWorker (event) {
+        let {data} = event;
+        if (!data) return;
+
+        if (data.messageId && this.pendingRequests.has(data.messageId)) {
+            const pending = this.pendingRequests.get(data.messageId);
+            clearTimeout(pending.timer);
+            this.pendingRequests.delete(data.messageId);
+
+            if (data.error) pending.reject(new Error(data.error));
+            else pending.resolve(data.result);
+            return;
+        }
+
+        if (this.isWorker && data.action === 'audio_trigger') {
+            const [eventName, ...eventArgs] = data.args;
+            this.trigger(eventName, ...eventArgs);
+            return;
+        }
+
+        if (this.isWorker) return;
+
+        const action = data.action ?? '';
+        if (!action.startsWith('audio_')) return;
+
+        const method = action.replace('audio_', '');
+        if (typeof this[method] !== 'function') return;
+
+        try {
+            const result = this[method](...data.args);
+
+            if (data.messageId) {
+                Promise.resolve(result).then(value => {
+                    this.worker?.postMessage({
+                        wid: this.workerID,
+                        messageId: data.messageId,
+                        result: value
+                    });
+                }).catch(err => {
+                    this.worker?.postMessage({
+                        wid: this.workerID,
+                        messageId: data.messageId,
+                        error: err.message
+                    });
+                });
+            }
+        } catch (err) {
+            this.error(`Worker request failed: ${method}`, err.message);
+            if (data.messageId && this.worker) {
+                this.worker.postMessage({
+                    wid: this.workerID,
+                    messageId: data.messageId,
+                    error: err.message
+                });
+            }
+        }
+    }
+    _sendWorker (data) {
+        postMessage({
+            wid: this.workerID,
+            ...data
+        });
+    }
+    _sendWorkerRequest (data, timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            const messageId = `req_${this.nextRequestId++}_${performance.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(messageId)) {
+                    this.pendingRequests.delete(messageId);
+                    reject(new Error(`AudioManager request timeout: ${data.action}`));
+                }
+            }, timeout);
+
+            this.pendingRequests.set(messageId, { resolve, reject, timer });
+
+            const payload = {
+                wid: this.workerID,
+                messageId,
+                ...data
+            };
+
+            if (this.isWorker) {
+                postMessage(payload);
+            } else if (this.worker) {
+                this.worker.postMessage(payload);
+            } else {
+                clearTimeout(timer);
+                this.pendingRequests.delete(messageId);
+                reject(new Error('No worker communication channel available'));
+            }
+        });
+    }
+    _initSpatialAudio () {
+        if (this.listener.forwardX) {
+            this.listener.forwardX.value = 0;
+            this.listener.forwardY.value = 0;
+            this.listener.forwardZ.value = -1;
+            this.listener.upX.value = 0;
+            this.listener.upY.value = 1;
+            this.listener.upZ.value = 0;
+            this.listener.positionX.value = 0;
+            this.listener.positionY.value = 0;
+            this.listener.positionZ.value = 0;
+        } else {
+            this.listener.setOrientation(0, 0, -1, 0, 1, 0);
+            this.listener.setPosition(0, 0, 0);
+        }
+    }
+    _generateInstanceId () {
+        return `instance_${this.nextInstanceId++}_${performance.now().toFixed(0)}`;
+    }
+    _setupAudioChain (source, gainNode, spatialConfig) {
+        if (spatialConfig) {
+            const spatialNodes = this._createSpatialNodes(spatialConfig);
+            source.connect(gainNode);
+            gainNode.connect(spatialNodes.panner);
+            spatialNodes.panner.connect(this.context.destination);
+            return spatialNodes;
+        } else {
+            source.connect(gainNode);
+            gainNode.connect(this.context.destination);
+            return null;
+        }
+    }
+    _createSpatialNodes (spatialConfig) {
+        const panner = this.context.createPanner();
+
+        panner.panningModel   = spatialConfig.panningModel || 'HRTF';
+        panner.distanceModel  = spatialConfig.distanceModel || 'inverse';
+        panner.refDistance    = spatialConfig.refDistance || 1;
+        panner.maxDistance    = spatialConfig.maxDistance || 10000;
+        panner.rolloffFactor  = spatialConfig.rolloffFactor || 1;
+        panner.coneInnerAngle = spatialConfig.coneInnerAngle || 360;
+        panner.coneOuterAngle = spatialConfig.coneOuterAngle || 360;
+        panner.coneOuterGain  = spatialConfig.coneOuterGain || 0;
+
+        const pos = spatialConfig.position || {x: 0, y: 0, z: 0};
+        if (panner.positionX) {
+            panner.positionX.value = pos.x;
+            panner.positionY.value = pos.y;
+            panner.positionZ.value = pos.z;
+        } else {
+            panner.setPosition(pos.x, pos.y, pos.z);
+        }
+
+        const orient = spatialConfig.orientation || {x: 1, y: 0, z: 0};
+        if (panner.orientationX) {
+            panner.orientationX.value = orient.x;
+            panner.orientationY.value = orient.y;
+            panner.orientationZ.value = orient.z;
+        } else {
+            panner.setOrientation(orient.x, orient.y, orient.z);
+        }
+
+        return {panner};
+    }
+    _setPannerPosition (panner, x, y, z) {
+        if (panner.positionX) {
+            panner.positionX.value = x;
+            panner.positionY.value = y;
+            panner.positionZ.value = z;
+        } else {
+            panner.setPosition(x, y, z);
+        }
+    }
+    _setPannerOrientation (panner, x, y, z) {
+        if (panner.orientationX) {
+            panner.orientationX.value = x;
+            panner.orientationY.value = y;
+            panner.orientationZ.value = z;
+        } else {
+            panner.setOrientation(x, y, z);
+        }
+    }
+    _getCurrentTimeSync (id) {
+        if (this.isWorker) return 0;
+
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId and get the first instance
         if (!instance) {
             for (const instanceData of this.instances.values()) {
                 if (instanceData.assetId === id) {
@@ -588,11 +1281,11 @@ class AudioManager {
 
         return 0;
     }
-    getDistance (id) {
-        // Check if it's an instanceId first
+    getDistanceSync (id) {
+        if (this.isWorker) return null;
+
         let instance = this.instances.get(id);
 
-        // If not found, check if it's an assetId and get the first spatial instance
         if (!instance) {
             for (const instanceData of this.instances.values()) {
                 if (instanceData.assetId === id && instanceData.spatialNodes && instanceData.spatialNodes.panner) {
@@ -625,219 +1318,6 @@ class AudioManager {
             Math.pow(py - ly, 2) +
             Math.pow(pz - lz, 2)
         );
-    }
-    /** ======== END ======== */
-
-    /** ======== BATCH OPERATION ======== */
-    muteAll () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_muteAll', args: []});
-            return this;
-        }
-
-        this.instances.forEach((instance) => {
-            instance.gainNode.gain.value = 0;
-        });
-        return this;
-    }
-    unmuteAll () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_unmuteAll', args: []});
-            return this;
-        }
-
-        this.instances.forEach((instance) => {
-            instance.gainNode.gain.value = instance.config.volume * this.masterVolume;
-        });
-        return this;
-    }
-    pauseAll () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_pauseAll', args: []});
-            return this;
-        }
-
-        const activeInstances = Array.from(this.instances.keys()).filter(instanceId => {
-            const instance = this.instances.get(instanceId);
-            return instance.isPlaying && !instance.isPaused;
-        });
-        activeInstances.forEach(instanceId => this.pause(instanceId));
-
-        return this;
-    }
-    resumeAll () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_resumeAll', args: []});
-            return this;
-        }
-
-        const pausedInstances = Array.from(this.instances.keys()).filter(instanceId => {
-            const instance = this.instances.get(instanceId);
-            return instance.isPaused;
-        });
-        pausedInstances.forEach(instanceId => this.resume(instanceId));
-
-        return this;
-    }
-    stopAll () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_stopAll', args: []});
-            return this;
-        }
-
-        this.instances.forEach((instance) => {
-            try {
-                instance.source.stop();
-            } catch (e) {
-                // Source might already be stopped
-            }
-        });
-
-        this.instances.clear();
-        this.assetInstances.clear();
-
-        return this;
-    }
-    /** ======== END ======== */
-
-    /** ======== CLEANER ======== */
-    delete (id) {
-        if (this.isWorker) {
-            this._sendWorker({ action: 'audio_delete', args: [id] });
-            return this;
-        }
-
-        let instance = this.instances.get(id);
-        if (instance) {
-            try { instance.source.stop() } catch {}
-            this.instances.delete(id);
-            if (this.assetInstances.has(instance.assetId)) {
-                this.assetInstances.get(instance.assetId).delete(id);
-                if (this.assetInstances.get(instance.assetId).size === 0)
-                    this.assetInstances.delete(instance.assetId);
-            }
-            return this;
-        }
-
-        const assetInstanceIds = this.assetInstances.get(id);
-        if (assetInstanceIds)
-            Array.from(assetInstanceIds).forEach(iId => this.delete(iId));
-
-        this.assets.delete(id);
-        return this;
-    }
-    cleanup () {
-        if (this.isWorker) {
-            this._sendWorker({action: 'audio_cleanup', args: []});
-            return this;
-        }
-
-        this.stopAll();
-        this.assets.clear();
-
-        if (this.context && this.context.state !== 'closed')
-            this.context.close();
-
-        this.instances.clear();
-        this.listener = null;
-        this.masterVolume = 1;
-        this.nextInstanceId = 0;
-
-        return this;
-    }
-    /** ======== END ======== */
-
-    /** ======== LOGS ======== */
-    warn (...args) {
-        console.warn('%c[AudioManager WARN]', 'color: #ff9800;', ...args);
-        return this;
-    }
-    error (...args) {
-        console.error('%c[AudioManager ERROR]', 'color: #f44336;', ...args);
-        return this;
-    }
-    /** ======== END ======== */
-
-    /** ======== PRIVATE METHODS ======== */
-    _handleWorker (event) {
-        let {data} = event;
-        const action = data?.action ?? '';
-
-        if (action.startsWith('audio_')) {
-            const callback = action.replace('audio_', '');
-            if (typeof this[callback] === 'function')
-                this[callback](...data.args);
-        }
-    }
-    _sendWorker (data) {
-        postMessage({
-            wid: this.workerID,
-            ...data
-        });
-    }
-    _initSpatialAudio () {
-        if (this.listener.forwardX) {
-            this.listener.forwardX.value = 0;
-            this.listener.forwardY.value = 0;
-            this.listener.forwardZ.value = -1;
-            this.listener.upX.value = 0;
-            this.listener.upY.value = 1;
-            this.listener.upZ.value = 0;
-            this.listener.positionX.value = 0;
-            this.listener.positionY.value = 0;
-            this.listener.positionZ.value = 0;
-        } else {
-            this.listener.setOrientation(0, 0, -1, 0, 1, 0);
-            this.listener.setPosition(0, 0, 0);
-        }
-    }
-    _generateInstanceId () {
-        return `instance_${this.nextInstanceId++}_${performance.now().toString(36)}`;
-    }
-    _setupAudioChain (source, gainNode, spatialConfig) {
-        if (spatialConfig) {
-            const spatialNodes = this._createSpatialNodes(spatialConfig);
-            source.connect(gainNode);
-            gainNode.connect(spatialNodes.panner);
-            spatialNodes.panner.connect(this.context.destination);
-            return spatialNodes;
-        } else {
-            source.connect(gainNode);
-            gainNode.connect(this.context.destination);
-            return null;
-        }
-    }
-    _createSpatialNodes (spatialConfig) {
-        const panner = this.context.createPanner();
-
-        panner.panningModel = spatialConfig.panningModel || 'HRTF';
-        panner.distanceModel = spatialConfig.distanceModel || 'inverse';
-        panner.refDistance = spatialConfig.refDistance || 1;
-        panner.maxDistance = spatialConfig.maxDistance || 10000;
-        panner.rolloffFactor = spatialConfig.rolloffFactor || 1;
-        panner.coneInnerAngle = spatialConfig.coneInnerAngle || 360;
-        panner.coneOuterAngle = spatialConfig.coneOuterAngle || 360;
-        panner.coneOuterGain = spatialConfig.coneOuterGain || 0;
-
-        const pos = spatialConfig.position || {x: 0, y: 0, z: 0};
-        if (panner.positionX) {
-            panner.positionX.value = pos.x;
-            panner.positionY.value = pos.y;
-            panner.positionZ.value = pos.z;
-        } else {
-            panner.setPosition(pos.x, pos.y, pos.z);
-        }
-
-        const orient = spatialConfig.orientation || {x: 1, y: 0, z: 0};
-        if (panner.orientationX) {
-            panner.orientationX.value = orient.x;
-            panner.orientationY.value = orient.y;
-            panner.orientationZ.value = orient.z;
-        } else {
-            panner.setOrientation(orient.x, orient.y, orient.z);
-        }
-
-        return {panner};
     }
     /** ======== END ======== */
 

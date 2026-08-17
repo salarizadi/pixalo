@@ -23,7 +23,6 @@ const dramaticFocus = entity => game.camera.dramaticFocus(
 
 // clickable targets
 const square1 = game.append(`target1`, {
-    shape: 'rect',
     width: 100,
     height: 100,
     x: (game.baseWidth - 500) / 2,
@@ -34,7 +33,6 @@ const square1 = game.append(`target1`, {
 square1.on('click', e => dramaticFocus(square1));
 
 const square2 = game.append(`target2`, {
-    shape: 'rect',
     width: 100,
     height: 100,
     x: game.baseWidth * 0.62,

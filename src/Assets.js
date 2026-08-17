@@ -1,11 +1,11 @@
 /**
- * Copyright (c) 2025 Pixalo
+ * Copyright (c) 2025-2026 Pixalo
  * @Repository: https://github.com/pixalo
  * @License: MIT
  */
 
 class Assets {
-    
+
     constructor (engine) {
         this.engine    = engine;
         this.resources = new Map();
@@ -29,16 +29,20 @@ class Assets {
             case 'spritesheet':
                 return this._loadSpriteSheet(type, id, src, config);
             case 'audio':
-                return this._loadAudio(id, src, config);
+                return this.engine.audio.load(id, src, config);
+            case 'font':
+                return this._loadFont(id, src, config);
             default:
                 return Promise.reject(new Error(`Unsupported asset type: ${type}`));
         }
     }
     async _loadImageAndTiles (type, id, src, config = {}) {
         try {
-            const response = await fetch(src);
+            const fetchOptions = this._buildFetchOptions(config);
+            const response = await fetch(src, fetchOptions);
+
             if (!response.ok)
-                throw new Error(`Failed to fetch image: ${response.statusText}`);
+                throw new Error(`Failed to fetch "${id}": ${response.statusText}`);
 
             const blob = await response.blob();
             const bitmapOptions = {
@@ -51,20 +55,18 @@ class Assets {
 
             if (type.toLowerCase() === 'tiles') {
                 if (!config.tileSize) {
-                    this.engine.warn('No tileSize specified for tiles');
-                    config.tileSize = 32; // Default value
+                    this.engine.warn(`"${id}": No tileSize specified, using default 32`);
+                    config.tileSize = 32;
                 }
 
                 if (!config.tiles) {
-                    this.engine.warn('No tiles configuration specified for tiles');
+                    this.engine.warn(`"${id}": No tiles configuration specified`);
                     config.tiles = {};
                 }
 
-                // Calculating the number of rows and columns
                 config.columns = Math.floor(asset.width / config.tileSize);
                 config.rows = Math.floor(asset.height / config.tileSize);
 
-                // Convert relative coordinates to absolute for each tile
                 for (const [name, coords] of Object.entries(config.tiles)) {
                     if (Array.isArray(coords)) {
                         const [x, y] = coords;
@@ -78,56 +80,56 @@ class Assets {
                 }
             }
 
-            // Apply asset config
             if (!config.tileSize) {
                 for (const key in config) {
                     if (key in asset) {
                         try {
                             asset[key] = config[key];
                         } catch (e) {
-                            this.engine.warn(`Failed to set property "${key}" on asset:`, e);
+                            this.engine.warn(`"${id}": Failed to set property "${key}"`);
                         }
                     }
                 }
             }
+
             this.resources.set(id, {id, asset, config, type});
             return Promise.resolve({asset, config, type});
         } catch (error) {
-            return Promise.reject(new Error(`Failed to load image: ${error.message}`));
+            if (error.name === 'AbortError') {
+                return Promise.reject(new Error(`"${id}": Request timed out (${config.timeout}ms)`));
+            }
+            return Promise.reject(new Error(`"${id}": ${error.message}`));
         }
     }
     async _loadSpriteSheet (type, id, src, config = {}) {
         try {
-            const response = await fetch(src);
-            if (!response.ok)
-                throw new Error(`Failed to fetch spritesheet: ${response.statusText}`);
+            const fetchOptions = this._buildFetchOptions(config);
+            const response = await fetch(src, fetchOptions);
 
-            const blob = await response.blob();
+            if (!response.ok)
+                throw new Error(`Failed to fetch "${id}": ${response.statusText}`);
+
+            const blob  = await response.blob();
             const asset = await createImageBitmap(blob, config.bitmap || {});
 
-            // Validation of essential parameters
             const requiredParams = ['columns', 'rows', 'width', 'height'];
             for (const param of requiredParams) {
                 if (!config[param]) {
-                    this.engine.error(`Missing required parameter: ${param}`);
+                    this.engine.error(`"${id}": Missing required parameter "${param}"`);
                     throw new Error(`Missing required parameter: ${param}`);
                 }
             }
 
-            // Setting default values for offset and margin
             config.originOffset = config.originOffset || [0, 0];
             config.margin = config.margin || [0, 0];
 
-            // Validating the structure of offset and margin arrays
             if (!Array.isArray(config.originOffset) || config.originOffset.length !== 2)
                 config.originOffset = [0, 0];
             if (!Array.isArray(config.margin) || config.margin.length !== 2)
                 config.margin = [0, 0];
 
-            // Calculate the total number of frames
             config.totalFrames = config.columns * config.rows;
 
-            // Create a frames array by calculating the position of each frame
             config.frames = [];
             for (let row = 0; row < config.rows; row++) {
                 for (let col = 0; col < config.columns; col++) {
@@ -140,29 +142,50 @@ class Assets {
                 }
             }
 
-            // Save assets to the assets collection
             this.resources.set(id, {id, asset, config, type});
-
             return Promise.resolve({asset, config, type});
         } catch (error) {
-            return Promise.reject(new Error(`Failed to load spritesheet: ${error.message}`));
+            if (error.name === 'AbortError') {
+                return Promise.reject(new Error(`"${id}": Request timed out (${config.timeout}ms)`));
+            }
+            return Promise.reject(new Error(`"${id}": ${error.message}`));
         }
     }
-    async _loadAudio (id, src, config = {}) {
-        if (!this.engine.config.worker)
-            return this.engine.audio.load(id, src, config);
-
-        return new Promise((resolve, reject) => {
-            const rootParent = this.engine.rootParent();
-            const onMsg = e => {
-                if (e.data.type === 'pixalo_audio_loaded') {
-                    rootParent.off('worker_msg', onMsg);
-                    resolve();
-                }
+    async _loadFont (id, src, config = {}) {
+        try {
+            const family      = id;
+            const descriptors = {
+                style  : config.style   || 'normal',
+                weight : config.weight  || '400',
+                stretch: config.stretch || 'normal',
+                display: config.display || 'swap',
+                ...config.descriptors   || {}
             };
-            rootParent.on('worker_msg', onMsg);
-            this.engine.audio.load(id, src, config).catch(reject);
-        });
+
+            const fontFace = new FontFace(family, `url(${src})`, descriptors);
+
+            let asset;
+            if (config.timeout && config.timeout > 0) {
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error(`Timed out after ${config.timeout}ms`)), config.timeout);
+                });
+                asset = await Promise.race([fontFace.load(), timeoutPromise]);
+            } else {
+                asset = await fontFace.load();
+            }
+
+            if (this.engine.config?.worker) {
+                self.fonts.add(asset);
+            } else {
+                document.fonts.add(asset);
+            }
+
+            this.resources.set(id, {id, asset, config: { ...config, family, descriptors }, type: 'font'});
+            this.engine.info?.(`"${id}": Font loaded`);
+            return Promise.resolve({asset, config, type: 'font'});
+        } catch (error) {
+            return Promise.reject(new Error(`"${id}": ${error.message}`));
+        }
     }
     /** ======== END ======== */
 
@@ -171,10 +194,8 @@ class Assets {
         const src = this.resources.get(id) || null;
         if (src !== null) return src;
 
-        // Prevent infinite recursion by checking if we're already at root
         if (!this.engine.parent) return null;
 
-        // Walk up the parent chain manually to avoid recursion
         let current = this.engine.parent;
         while (current) {
             const asset = current.assets.resources.get(id);
@@ -185,15 +206,67 @@ class Assets {
         return null;
     }
     delete (id) {
+        const resource = this.resources.get(id);
+        if (resource && resource.type === 'font' && resource.asset) {
+            (typeof document !== 'undefined' ? document : self).fonts.delete(resource.asset);
+        }
         this.resources.delete(id);
         return this;
     }
     clear () {
+        const fonts = typeof document !== 'undefined' ? document.fonts : self.fonts;
+        for (const [id, resource] of this.resources) {
+            if (resource.type === 'font' && resource.asset) {
+                fonts.delete(resource.asset);
+            }
+        }
         this.resources.clear();
         return this;
     }
     /** ======== END ======== */
-    
+
+    /** ======== PRIVATE HELPER METHODS ======== */
+    _createAbortController (timeout) {
+        const controller = new AbortController();
+
+        if (timeout && timeout > 0) {
+            const timer = setTimeout(() => {
+                controller.abort(new Error(`Timed out after ${timeout}ms`));
+            }, timeout);
+
+            const originalAbort = controller.abort.bind(controller);
+            controller.abort = (reason) => {
+                clearTimeout(timer);
+                originalAbort(reason);
+            };
+        }
+
+        return controller;
+    }
+    _buildFetchOptions (config = {}) {
+        const options = { ...config.fetch };
+
+        if (config.timeout && config.timeout > 0) {
+            const controller = this._createAbortController(config.timeout);
+            options.signal = controller.signal;
+        }
+
+        if (config.fetch?.signal) {
+            const userSignal = config.fetch.signal;
+
+            if (config.timeout && config.timeout > 0) {
+                const controller = this._createAbortController(config.timeout);
+                userSignal.addEventListener('abort', () => controller.abort(userSignal.reason));
+                options.signal = controller.signal;
+            } else {
+                options.signal = userSignal;
+            }
+        }
+
+        return options;
+    }
+    /** ======== END ======== */
+
 }
 
 export default Assets;

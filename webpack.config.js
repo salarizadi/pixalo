@@ -1,9 +1,20 @@
-import path from 'path';
-import webpack from 'webpack';
-import TerserPlugin from 'terser-webpack-plugin';
+/**
+ * Copyright (c) 2025-2026 Pixalo
+ * @Repository: https://github.com/pixalo
+ * @License: MIT
+ */
+import path             from 'path';
+import { readFileSync } from 'fs';
+import webpack          from 'webpack';
+import TerserPlugin     from 'terser-webpack-plugin';
+
+const pkg = JSON.parse(readFileSync(
+    new URL('./package.json', import.meta.url), 'utf-8'));
+const { version } = pkg;
 
 const banner = `/*!
- * Copyright (c) 2025 Pixalo
+ * Copyright (c) 2025-2026 Pixalo
+ * @Version: ${version}
  * @Repository: https://github.com/pixalo 
  * @License: MIT
  */`;

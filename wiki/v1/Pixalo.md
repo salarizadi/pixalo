@@ -50,6 +50,7 @@ const game = new Pixalo('#canvas', {
     collision: CollisionConfig<object> | Boolean, // See Collision class documentation
     physics: PhysicsConfig<object> | Boolean,     // See Physics class documentation
     camera: CameraConfig<object> | Undefined,     // See Camera class documentation
+    mute: Boolean,                                // Default(`false`) - Set to `true` to mute all audio
 });
 ```
 
@@ -396,21 +397,31 @@ game.data('highScore');  // → undefined
 
 ## Canvas Management
 
-### `resize(width, height)`: Pixalo
+### `resize(width, height, trigger = true, target = null)`
 
 Manually resizes the canvas to specified dimensions.
 
-| Name   | Type   | Default |
-|--------|--------|---------|
-| width  | Number | -       |
-| height | Number | -       |
+| Name    | Type                          | Default | Description                                                                        |
+|---------|-------------------------------|---------|------------------------------------------------------------------------------------|
+| width   | Number                        | `0`     | New canvas width in pixels.                                                        |
+| height  | Number                        | `0`     | New canvas height in pixels.                                                       |
+| trigger | Boolean                       | `true`  | Whether to trigger the `'resize'` event.                                           |
+| target  | String \| HTMLElement \| null | `null`  | The resize target identifier (e.g., `'window'`, `'document'`, or an HTML element). |
 
 **Usage Examples:**
 
 ```javascript
 // Resize canvas to 1024x768
 game.resize(1024, 768);
+
+// Resize without triggering the resize event
+game.resize(1920, 1080, false);
+
+// Resize with a specific target identifier
+game.resize(800, 600, true, 'window');
 ```
+
+**Note:** If the instance is a scene (`this.isScene` is `true`), this method only updates `this.bounds.width` and `this.bounds.height` without modifying the actual canvas.
 
 ---
 
@@ -1659,22 +1670,39 @@ console.log(game.int({}, 20));       // 20
 ### `wait(...args)` (async): Promise<Array>
 
 Waits for multiple promises to complete and returns their results.
+Supports nested arrays and an optional progress callback as the last argument.
 
 | Name    | Type                | Default |
 |---------|---------------------|---------|
 | ...args | Promise\|Array\|Any | -       |
 
+**Parameters:**
+- All arguments are flattened and resolved as promises
+- **Last argument can be a `function`** — used as progress callback
+- Progress callback receives: `{ state, loaded, total, percent, index, error }`
+
+| Callback Param | Type   | Description                                               |
+|----------------|--------|-----------------------------------------------------------|
+| `state`        | String | `start` \| `loading` \| `error` \| `complete` \| `failed` |
+| `loaded`       | Number | Number of resolved promises so far                        |
+| `total`        | Number | Total number of promises                                  |
+| `percent`      | Number | Progress from `0` to `1`                                  |
+| `index`        | Number | Index of the promise that just resolved                   |
+| `error`        | Error  | Error object (only when `state: 'error'`)                 |
+
+---
+
 **Usage Examples:**
 
 ```javascript
-// Wait for multiple asset loads
+// Basic usage — wait for multiple asset loads
 const results = await game.wait(
     game.assets.load('image', 'player', 'player.png'),
     game.assets.load('audio', 'bgm', 'music.mp3'),
     game.delay(1000)
 );
 
-// Wait for nested arrays of promises
+// Nested arrays of promises (auto-flattened)
 const results2 = await game.wait([
     promise1,
     [promise2, promise3],
@@ -1683,6 +1711,35 @@ const results2 = await game.wait([
 
 // Returns empty array if no arguments
 const empty = await game.wait(); // Returns []
+
+// ======== WITH PROGRESS CALLBACK ========
+const results = await game.wait(
+    game.assets.load('image', 'bg', 'bg.png'),
+    game.assets.load('font', 'main', 'font.ttf'),
+    game.assets.load('audio', 'sfx', 'sfx.mp3'),
+    fetch('https://api.example.com/data').then(r => r.json()),
+    
+    // Progress callback (last argument)
+    ({ state, loaded, total, percent, index, error }) => {
+        switch (state) {
+            case 'start':
+                console.log('Loading started...');
+                break;
+            case 'loading':
+                console.log(`Loaded ${loaded}/${total} (${Math.round(percent * 100)}%)`);
+                break;
+            case 'error':
+                console.error(`Item ${index + 1} failed:`, error);
+                break;
+            case 'complete':
+                console.log('All done!');
+                break;
+            case 'failed':
+                console.error('Some items failed');
+                break;
+        }
+    }
+);
 ```
 
 ---
