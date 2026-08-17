@@ -1,5 +1,221 @@
 # CHANGELOG
 
+## [1.4.0] - 2026-08-??
+
+### ✨ New Features
+
+### Pixalo Class
+- Added [`config.mute`](https://github.com/pixalo/pixalo/blob/main/wiki/v1/Pixalo.md#getting-start) to globally mute/unmute all audio on engine start.
+
+#### Font Loading Support
+- Added `font` type to `Assets.load()` for loading `TTF/OTF/WOFF/WOFF2` fonts via FontFace API
+- Added `config.timeout` support for font loading with graceful timeout handling
+- Full Web Worker support using `self.fonts` (no DOM dependency)
+- Font cleanup on `delete()` and `clear()` from both `document.fonts` and `self.fonts`
+- Configurable font descriptors: `weight`, `style`, `stretch`, `display`
+- Added `config.descriptors` for custom FontFace descriptors (e.g., `unicodeRange`)
+
+```javascript
+// Load font in main thread or worker
+await game.assets.load('font', 'PixelFont', 'path/font.ttf', {
+  weight : '700',
+  style  : 'normal',
+  display: 'swap'  // auto | block | swap | fallback | optional
+});
+
+// Load font with timeout and custom descriptors
+await game.assets.load('font', 'CustomFont', 'path/font.woff2', {
+  weight: '400',
+  style: 'italic',
+  stretch: 'condensed',
+  display: 'swap',
+  descriptors: { unicodeRange: 'U+0000-00FF' },
+  timeout: 8000
+});
+```
+
+#### Asset Loading - Timeout & AbortController Support
+- Added `_createAbortController()` and `_buildFetchOptions()` for robust request management
+- `config.timeout` support for image, tiles, spritesheet, and font loading
+- `config.fetch` support for custom fetch options (signal, headers, credentials, etc.)
+- Graceful AbortError handling with descriptive timeout messages
+- User-provided AbortSignal combined with timeout when both present
+
+```javascript
+// Load with timeout
+await game.assets.load('image', 'bg', 'path/bg.png', { timeout: 5000 });
+
+// Load with custom fetch options
+await game.assets.load('image', 'sprite', 'path/sprite.png', {
+    fetch: { credentials: 'include', headers: { 'X-Custom': 'value' } }
+});
+
+// Load with user AbortSignal
+const controller = new AbortController();
+await game.assets.load('image', 'map', 'path/map.png', {
+    fetch: { signal: controller.signal }
+});
+```
+
+#### Asset Loading - Bitmap Options
+- Added `config.bitmap` support for `createImageBitmap()` in image and spritesheet loading
+- Configurable: `colorSpaceConversion`, `imageOrientation`, `premultiplyAlpha`
+
+```javascript
+await game.assets.load('image', 'sprite', 'path/sprite.png', {
+    bitmap: {
+        colorSpaceConversion: 'default',
+        imageOrientation: 'from-image',
+        premultiplyAlpha: 'default'
+    }
+});
+```
+
+#### Asset Loading - Image Property Assignment
+- When loading `image` type (no `tileSize`), properties from config are automatically assigned to the asset object
+- Allows attaching custom metadata directly to the ImageBitmap
+
+```javascript
+await game.assets.load('image', 'bg', 'path/bg.png', {
+    customTag: 'background',
+    layer: 0
+});
+const asset = game.assets.get('bg');
+console.log(asset.config.customTag); // 'background'
+```
+
+#### Asset Loading - Tiles Fallback
+- If `config.tiles` is not provided for `tiles` type, a warning is logged and empty object `{}` is used as fallback
+- Prevents crashes from missing tile configuration
+
+#### Async Progress Tracking
+- Added progress callback support to `game.wait()`
+- Real-time progress reporting for parallel promise resolution
+- States: `start`, `loading`, `error`, `complete`, `failed`
+
+```javascript
+const results = await game.wait(
+    game.assets.load('image', 'bg', 'bg.png'),
+    game.assets.load('audio', 'sfx', 'sfx.mp3'),
+
+    // Progress callback (last argument)
+    ({ state, loaded, total, percent, index, error }) => {
+      loadingBar.style('width', percent * 300);
+      console.log(`${Math.round(percent * 100)}%`);
+    }
+);
+```
+
+#### AudioManager - Complete Rewrite with Worker Support
+- **Full Web Worker support**: AudioManager now runs seamlessly in both Main Thread and Worker contexts
+- **Event forwarding**: All events (`play`, `pause`, `ended`, `looped`, etc.) triggered in Main Thread automatically propagate to Worker listeners
+- **Request/Response protocol**: All methods return `Promise` in both modes via `_sendWorkerRequest()`
+- **Serializable return values**: Eliminated `postMessage` clone errors by returning only serializable data (no `AudioBuffer`, `AudioNode`, or `AudioManager` instances)
+
+#### AudioManager - `allowMultiple` Instance Control
+- Added `config.allowMultiple` flag (default: `true`) to control simultaneous playback
+- When `false`, duplicate `play()` calls are ignored with a warning log
+- Prevents accidental audio stacking and infinite loop recursion
+
+```javascript
+await game.audio.load('bgm', '/bgm.mp3', {allowMultiple: false});
+await game.audio.play('bgm');  // plays
+await game.audio.play('bgm');  // ignored! warn logged
+```
+
+#### AudioManager - Multi-Instance Control
+- `pause()`, `stop()`, `seek()`, `setVolume()`, `setSpatialPosition()`, `setSpatialOrientation()` now accept both `instanceId` and `assetId`
+- When `assetId` is passed, changes apply to **all instances** of that asset
+- `resume()` accepts `assetId` and resumes the **first paused instance**
+
+```javascript
+await game.audio.play('sfx');   // instance_1
+await game.audio.play('sfx');   // instance_2
+await game.audio.pause('sfx');  // pauses BOTH
+await game.audio.stop('sfx');   // stops BOTH
+```
+
+#### AudioManager - Manual Loop Management
+- **Fixed loop memory leak**: Replaced native `source.loop` with manual loop management via `onended` callback
+  - `source.loop` is now always `false` — AudioManager has full control over playback lifecycle
+  - When `config.loop` is enabled, `onended` fires normally, cleans up the old instance, and spawns a fresh one
+  - Prevents memory leaks caused by `AudioBufferSourceNode` staying alive indefinitely when native loop is active
+  - `pause()`, `stop()`, `muteAll()`, `setVolume()` now work correctly on looping sounds
+
+#### AudioManager - `seek()` Method
+- Added `seek()` method for jumping to any position in active audio playback
+- Clamps seek time between `0` and audio duration automatically
+- Preserves instance ID and state while recreating the audio source at the new position
+- Fully compatible with loop, spatial audio, mute, and volume controls
+
+```javascript
+// Seek to 20 seconds
+await px.audio.seek('music', 20);
+
+// Seek to 50% of duration
+const duration = await px.audio.getDuration('music');
+await px.audio.seek('music', duration * 0.5);
+```
+
+#### AudioManager - Extended Event System
+
+- Added new events.
+- All events are serializable and forwarded to Worker correctly.
+- Event payloads include `instanceId`, `assetId`, and relevant metadata.
+
+| Event          | Triggered By   | Payload                                  |
+|----------------|----------------|------------------------------------------|
+| `load`         | `load()`       | `{assetId, config}`                      |
+| `play`         | `play()`       | `{instanceId, assetId}`                  |
+| `pause`        | `pause()`      | `{instanceId, assetId, currentTime}`     |
+| `resume`       | `resume()`     | `{instanceId, assetId, currentTime}`     |
+| `stop`         | `stop()`       | `{instanceId, assetId}`                  |
+| `seek`         | `seek()`       | `{instanceId, assetId, seekTime}`        |
+| `ended`        | `onended`      | `{instanceId, assetId}`                  |
+| `looped`       | `onended`      | `{instanceId, assetId}`                  |
+| `volumechange` | `setVolume()`  | `{instanceId?, assetId?, volume, type?}` |
+| `loopchange`   | `loop()`       | `{instanceId?, assetId, loop}`           |
+| `mute`         | `muteAll()`    | `{type: 'global'}`                       |
+| `unmute`       | `unmuteAll()`  | `{type: 'global'}`                       |
+
+#### AudioManager - Worker Timeout & Error Handling
+- `load()` uses 60-second timeout for large audio files
+- All Worker requests have configurable timeout (default: 1s)
+- Graceful error handling with descriptive messages
+
+---
+
+### 🔧 Changed
+
+#### AudioManager - API Changes (Breaking)
+- **All methods now return `Promise`** — even in Main Thread mode
+- **Return values changed** to serializable objects only:
+  - `play()` now returns `{instanceId, assetId, duration}` instead of `{instanceId, assetId, source, gainNode, spatialNodes}`
+  - `load()` now returns `{assetId, duration, numberOfChannels, sampleRate, config}` instead of `{asset, config}`
+- `loop()` getter now returns `Promise<boolean>` via `_sendWorkerRequest()`
+- `isMuted()` without arguments returns global mute state
+- Removed `pixalo_audio_loaded` internal message (replaced by standard request/response)
+
+---
+
+### 🐛 Fixed
+
+- **AudioManager loop memory leak**: Native `source.loop` caused `AudioBufferSourceNode` to stay alive indefinitely. Now manually managed via `onended`.
+- **postMessage clone errors**: `AudioBuffer`, `AudioNode`, and `AudioManager` instances were being sent across Worker boundary, causing `Failed to execute 'postMessage': object could not be cloned`. Now all return values are strictly serializable.
+- **`seek()` with assetId**: Previously threw error when multiple instances existed. Now applies to all instances.
+- **`setVolume()` with assetId**: Previously only updated the first instance. Now updates all instances.
+- **`setSpatialPosition()` / `setSpatialOrientation()` with assetId**: Previously only updated the first instance. Now updates all instances.
+- **`allowMultiple` default propagation**: Options now correctly fall back to asset config, then to default `true`.
+
+---
+
+### 📚 Documentation
+
+- Complete rewrite of [`AudioManager.md`](https://github.com/pixalo/pixalo/blob/main/wiki/v1/AudioManager.md)
+- Complete rewrite of [`Assets.md`](https://github.com/pixalo/pixalo/blob/main/wiki/v1/Assets.md)
+
+---
+
 ## [1.3.0] - 2025-12-04
 
 ### 🚀 Performance & Stability

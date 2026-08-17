@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Pixalo
+ * Copyright (c) 2025-2026 Pixalo
  * @Repository: https://github.com/pixalo
  * @License: MIT
  */
@@ -129,6 +129,9 @@ class Pixalo extends Utils {
 
         this.emitters           = new Emitters(this);
         this.audio              = new AudioManager(this.config.worker);
+        if (config.mute === true) {
+            this.audio.muteAll();
+        }
 
         this.animations         = {};
         this.deltaTime          = 0;

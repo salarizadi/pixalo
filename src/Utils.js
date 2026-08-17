@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Pixalo
+ * Copyright (c) 2025-2026 Pixalo
  * @Repository: https://github.com/pixalo
  * @License: MIT
  */
@@ -28,9 +28,9 @@ class Utils {
                 appendTo.appendChild(canvas);
             }
         } else if (selector instanceof HTMLCanvasElement)
-            return selector
+            return selector;
         else
-            throw new Error('Invalid HTMLCanvasElement')
+            throw new Error('Invalid HTMLCanvasElement');
 
         return canvas;
     }
@@ -1431,14 +1431,71 @@ class Utils {
         if (args.length === 0)
             return [];
 
+        // Extract onProgress callback if last arg is a function
+        let onProgress = null;
+        const lastArg = args[args.length - 1];
+        if (typeof lastArg === 'function' && !lastArg.then) {
+            onProgress = args.pop();
+        }
+
         const promises = this._flattenPromises(args);
 
         if (promises.length === 0)
             return [];
 
+        // If no progress callback, simple Promise.all
+        if (!onProgress) {
+            try {
+                return await Promise.all(promises);
+            } catch (error) {
+                throw new Error(`Wait operation failed: ${error.message}`);
+            }
+        }
+
+        // Progress tracking
+        const total   = promises.length;
+        let loaded    = 0;
+        const results = new Array(total);
+        const errors  = new Array(total);
+
+        onProgress({ state: 'start', loaded: 0, total, percent: 0 });
+
+        const wrappedPromises = promises.map((promise, index) =>
+            promise.then(
+                result => {
+                    results[index] = result;
+                    loaded++;
+                    onProgress({
+                        state: 'loading',
+                        loaded,
+                        total,
+                        percent: loaded / total,
+                        index
+                    });
+                    return result;
+                },
+                error => {
+                    errors[index] = error;
+                    loaded++;
+                    onProgress({
+                        state: 'error',
+                        loaded,
+                        total,
+                        percent: loaded / total,
+                        index,
+                        error
+                    });
+                    throw error; // Re-throw to fail Promise.all
+                }
+            )
+        );
+
         try {
-            return await Promise.all(promises);
+            const finalResults = await Promise.all(wrappedPromises);
+            onProgress({ state: 'complete', loaded, total, percent: 1 });
+            return finalResults;
         } catch (error) {
+            onProgress({ state: 'failed', loaded, total, percent: loaded / total, errors });
             throw new Error(`Wait operation failed: ${error.message}`);
         }
     }
